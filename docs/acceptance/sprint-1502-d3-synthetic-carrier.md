@@ -12,6 +12,7 @@ the card ref and the `run_id` of its current worker `HeadRun`. Nothing else is i
 
 - not the sprint observer or any control or standing head;
 - not the reviewer head of the carrier card;
+- not the worker head's supervisor or the shell wrapper that launched the provider;
 - not any head of another card or another sprint;
 - no pipeline freeze, since a freeze produces `operator_stop`, not `head_exit`.
 
@@ -61,18 +62,28 @@ all three values together, in one sitting, and act only if they agree:
 2. Head run id. Read `ummanu head-status --instance <dir> --workspace <path>` for the card's
    workspace. Pick the row whose `kind` is worker, whose `head` is `alive`, and note its `run_id`.
    A reviewer row, an `absent` or `unproven` head, or more than one worker row stops the check.
-3. Worker PID. Take the agent PID from that same row's launch identity (`process`), not from a
-   process listing by name. Confirm in `/proc/<pid>` that the process is live and its working
-   directory is the card's workspace.
+3. Agent PID. Start from the heartbeat PID in that same row's launch identity (`process`), not
+   from a process listing by name. The heartbeat PID can be the shell wrapper rather than the
+   provider; the agent PID is then the wrapper's single provider child. Confirm in `/proc` that
+   the child is live, its parent is the heartbeat PID, its command line names the worker's
+   provider and its working directory is the card's workspace. The supervisor, the wrapper and
+   any other child are not the target.
 
 If any value disagrees, or the row changes between reads, do nothing and re-read. A head that ends
 by itself before the signal is not attributed to the operator and does not count as this check.
 
+A run id or PID noted before the card was paused, stopped, resumed or sent back to a working round
+is a hint, not a target. After any such step all three values are read again from live state.
+
 ## Operator action
 
-Send one SIGKILL to the verified agent PID. Do not stop the supervisor, do not remove the heartbeat,
-do not touch the workspace, and do not run a dispatcher tick by hand. Write down the wall-clock time
-of the signal; it is the lower bound for the record's `occurred_at`.
+Send one SIGKILL to the verified agent PID. Do not signal the supervisor or the wrapper, do not
+remove the heartbeat, do not touch the workspace, and do not run a dispatcher tick by hand. Write
+down the wall-clock time of the signal; it is the lower bound for the record's `occurred_at`.
+
+The wrapper is expected to end with its provider child, so the heartbeat then names a gone process.
+If the heartbeat PID stays live and no `Dead` verdict follows, the check has not passed; that is a
+finding for the observer, not a reason for a second signal.
 
 ## What the watchdog is expected to do
 
