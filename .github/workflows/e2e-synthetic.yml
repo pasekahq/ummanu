@@ -25,6 +25,9 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: read
+
 jobs:
   synthetic:
     name: synthetic e2e

@@ -9,6 +9,9 @@ The project is pre-1.0 and has no release branches. Development and fixes happen
 Reports are welcome in whatever form is convenient: a public issue, a pull request or GitHub's
 private vulnerability-reporting flow. Rough notes and incomplete reports are welcome too.
 
+To report privately, open a draft advisory at
+<https://github.com/pasekahq/ummanu/security/advisories/new>.
+
 Please do not include working credentials, private keys, recovery phrases, personal data or other
 secrets in a public report.
 
