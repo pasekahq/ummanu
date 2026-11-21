@@ -14,6 +14,19 @@ updates:
     commit-message:
       prefix: "deps"
     labels: [dependencies]
+  - package-ecosystem: pip        # hash-pinned CI-only tools in .github/requirements/*.txt
+    directory: /.github
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      ci-python:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+    labels: [dependencies, ci]
   - package-ecosystem: github-actions
     directory: /
     schedule:

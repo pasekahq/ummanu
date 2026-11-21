@@ -939,7 +939,7 @@ class CiTestSuiteManifestTests(unittest.TestCase):
             f"""      - name: Upload suite JUnit and bounded log
         if: ${{{{ always() }}}}
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-evidence-${{{{ matrix.suite }}}}-{candidate_sha}
           path: ${{{{ runner.temp }}}}/ci-evidence/${{{{ matrix.suite }}}}
@@ -960,7 +960,7 @@ class CiTestSuiteManifestTests(unittest.TestCase):
             f"""      - name: Upload raw suite coverage
         if: ${{{{ always() }}}}
         continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-coverage-${{{{ matrix.suite }}}}-{candidate_sha}
           path: ${{{{ runner.temp }}}}/ci-coverage/${{{{ matrix.suite }}}}/coverage.${{{{ matrix.suite }}}}
@@ -984,7 +984,7 @@ class CiTestSuiteManifestTests(unittest.TestCase):
             """      - name: Download suite evidence
         if: ${{ always() }}
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ci-evidence-*
           path: ${{ runner.temp }}/ci-evidence
