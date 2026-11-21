@@ -318,7 +318,7 @@ class DodScaleTests(unittest.TestCase):
         )
         self.assertEqual(drawn.count(" split"), 2)
         self.assertIn('role="progressbar" aria-valuemin="0" aria-valuemax="5" aria-valuenow="3"', drawn)
-        self.assertIn('aria-label="3 of 5 items in main, 2 met"', drawn)
+        self.assertIn('aria-label="3 of 5 items met or in main (2 met)"', drawn)
 
     def test_the_legend_partitions_the_in_scope_items_by_the_scale_groups(self) -> None:
         drawn = page_parts._dod_scale(self.interleaved())

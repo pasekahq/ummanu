@@ -510,7 +510,7 @@ def _dod_scale(dod: dict[str, Any], *, compact: bool = False) -> str:
     )
     filled = counts["met"] + counts["main"]
     words = (
-        f"{filled} of {dod.get('total')} items in main, {counts['met']} met"
+        f"{filled} of {dod.get('total')} items met or in main ({counts['met']} met)"
         if counts["main"] else f"{filled} of {dod.get('total')} items met"
     )
     track = (
