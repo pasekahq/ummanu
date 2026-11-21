@@ -98,7 +98,7 @@ jobs:
           exit 1
       - name: Install the declared distribution build backend
         if: ${{ matrix.suite == 'packaging' }}
-        run: python3 -m pip install 'setuptools>=77'
+        run: python3 -m pip install --require-hashes --no-deps -r .github/requirements/packaging-build.txt
       - name: Run reported suite
         id: run_suite
         continue-on-error: true
