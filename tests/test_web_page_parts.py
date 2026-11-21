@@ -265,7 +265,7 @@ class DodScaleTests(unittest.TestCase):
         self.assertIn(" · 25%", drawn)
         self.assertNotIn("not estimated", drawn)
 
-    def test_the_compact_scale_counts_met_over_in_scope_and_draws_no_zeros_without_a_structure(self) -> None:
+    def test_the_compact_scale_counts_filled_over_in_scope_and_draws_no_zeros_without_a_structure(self) -> None:
         items = sprint_dod.met(self.items(3, 1), "d2", "PR 5", {"role": "po", "actor": "po", "at": "now"})
 
         drawn = page_parts._dod_scale(sprint_dod.section(items), compact=True)
@@ -317,7 +317,8 @@ class DodScaleTests(unittest.TestCase):
             [("met", "d2"), ("met", "d4"), ("main", "d5"), ("open", "d1"), ("open", "d3")],
         )
         self.assertEqual(drawn.count(" split"), 2)
-        self.assertIn('role="progressbar" aria-valuemin="0" aria-valuemax="5" aria-valuenow="2"', drawn)
+        self.assertIn('role="progressbar" aria-valuemin="0" aria-valuemax="5" aria-valuenow="3"', drawn)
+        self.assertIn('aria-label="3 of 5 items in main, 2 met"', drawn)
 
     def test_the_legend_partitions_the_in_scope_items_by_the_scale_groups(self) -> None:
         drawn = page_parts._dod_scale(self.interleaved())
@@ -331,7 +332,21 @@ class DodScaleTests(unittest.TestCase):
 
         self.assertEqual(states, ["met", "met", "main", "open", "open"])
         self.assertIn('title="2 met · 1 in main · 2 open · 40% · 1 descoped"', drawn)
-        self.assertIn('<span class="mono">2 / 5</span>', drawn)
+        self.assertIn('<span class="mono">3 / 5</span>', drawn)
+
+    def test_the_compact_number_counts_the_items_in_main_the_bar_fills(self) -> None:
+        """Nothing met yet, three items merged: the bar fills three segments and the number says 3, not 0."""
+        po = {"role": "po", "actor": "po", "at": "now"}
+        items = self.items(1, 1, 1, 1)
+        for item in ("d1", "d2", "d4"):
+            items = sprint_dod.marked_in_main(items, item, "merged", po)
+
+        drawn = page_parts._dod_scale(sprint_dod.section(items, cards=[], events=[]), compact=True)
+        filled = [state for state, _ in self.drawn_segments(drawn) if state != "open"]
+
+        self.assertEqual(len(filled), 3)
+        self.assertIn('<span class="mono">3 / 4</span>', drawn)
+        self.assertIn('aria-valuenow="3"', drawn)
 
     def test_an_unknown_delivery_draws_no_in_main_group(self) -> None:
         po = {"role": "po", "actor": "po", "at": "now"}

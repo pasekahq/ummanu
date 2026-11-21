@@ -462,7 +462,8 @@ def _dod_scale(dod: dict[str, Any], *, compact: bool = False) -> str:
     """The sprint's progress: one segment per in-scope DoD item, as wide as its share.
 
     Segments run met, then in main awaiting the live check, then open, in item order within a group,
-    so the filled part is one bar from the left edge. Compact keeps met / in-scope; the rest goes to the title.
+    so the filled part is one bar from the left edge. The number counts that filled part (met or in main)
+    over in-scope items, so it always matches the bar. Compact keeps that number; the rest goes to the title.
     """
     if not dod.get("structured"):
         if compact:
@@ -507,10 +508,14 @@ def _dod_scale(dod: dict[str, Any], *, compact: bool = False) -> str:
     tail = (f" · {float(progress) * 100:.0f}%" if progress is not None else "") + (
         f" · {descoped} descoped" if descoped else ""
     )
-    words = f"{dod.get('met')} of {dod.get('total')} items met"
+    filled = counts["met"] + counts["main"]
+    words = (
+        f"{filled} of {dod.get('total')} items in main, {counts['met']} met"
+        if counts["main"] else f"{filled} of {dod.get('total')} items met"
+    )
     track = (
         f'<span class="track" role="progressbar" aria-valuemin="0" aria-valuemax="{dod.get("total")}" '
-        f'aria-valuenow="{dod.get("met")}" aria-label="{escape(words)}">{"".join(segments)}</span>'
+        f'aria-valuenow="{filled}" aria-label="{escape(words)}">{"".join(segments)}</span>'
     )
     if compact:
         said = (
@@ -520,7 +525,7 @@ def _dod_scale(dod: dict[str, Any], *, compact: bool = False) -> str:
         )
         return (
             f'<div class="dod-scale compact" title="{escape(said)}"><span class="label">DoD</span>'
-            f'{track}<span class="mono">{dod.get("met")} / {dod.get("total")}</span></div>'
+            f'{track}<span class="mono">{filled} / {dod.get("total")}</span></div>'
         )
     unweighed = "" if dod.get("estimated") else _chip("not estimated")
     keys = " · ".join(
