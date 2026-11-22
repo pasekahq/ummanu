@@ -83,6 +83,7 @@ from ummanu.tasks import RELEASE_MERGE_KEY, post_merge_ci_fact, recorded_card_tr
 from ummanu.webproto import sources
 from ummanu.webproto._values import _reason
 from ummanu.webproto.boundary import ProtocolBoundary
+from ummanu.webproto.card_listing import linked_cards
 from ummanu.webproto.errors import (
     InstallationUnavailable,
     RuntimeUnavailable,
@@ -1499,7 +1500,7 @@ class SprintReadLayer(ProtocolBoundary):
     def _linked_cards(self, reader: SprintReader, data_dir: Path, *, now: float) -> Reading:
         """Every sprint's cards, in one Pipeline listing, or the reason there are none to show."""
         try:
-            linked = reader.linked_cards(include_archived=True)
+            linked = linked_cards(reader)
         except Exception as exc:  # noqa: BLE001 -- confined to this source read
             return Reading(
                 SOURCE_CARDS,

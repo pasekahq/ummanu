@@ -36,6 +36,7 @@ from ummanu.tasks import TaskReader, task_audit_for
 from ummanu.webproto import agents as agent_reads, board_view as board_reads, head_view as head_reads, sources
 from ummanu.webproto._values import _reason, _text
 from ummanu.webproto.boundary import ProtocolBoundary
+from ummanu.webproto.card_listing import current_cards
 from ummanu.webproto.cursor import Cursor, decode
 from ummanu.webproto.errors import (
     HeadRunNotFound,
@@ -607,7 +608,7 @@ class ReadLayer(ProtocolBoundary):
     def _tasks(self, data_dir: Path, *, now: float) -> dict[str, Any]:
         """The cards the pipeline is carrying, as `ummanu task list` reads them."""
         try:
-            rows = TaskReader(self._client()).list(states=set(CURRENT_TASK_STATES))
+            rows = current_cards(self._client(), CURRENT_TASK_STATES)
         except Exception as exc:  # noqa: BLE001 -- confined to this source read
             return {
                 "source": sources.unavailable(

@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, quote, unquote
 from ummanu.web import pages
 from ummanu.web.doctor import DoctorLayer
 from ummanu.web.statuses import status_for
+from ummanu.webproto.card_listing import one_listing
 from ummanu.webproto.errors import OperationPending, ReadError, RuntimeUnavailable, ValidationRefused
 from ummanu.webproto.journal import DEFAULT_LIMIT, MAX_LIMIT
 from ummanu.webproto.owner_events import OwnerEventLayer
@@ -505,11 +506,12 @@ class WebApp:
         """The operator's one screen, assembled from four reads that fail apart.
 
         Only the snapshot's refusal fails the page; pause, open sprints and the command feed each
-        show their own reason instead.
+        show their own reason instead. The current cards and the sprints' cards share one listing.
         """
-        snapshot = self.reads.system_snapshot()
-        pause = self._or_reason(self.pause_reads.pause_state)
-        sprints = self._or_reason(lambda: self.sprint_reads.sprint_list(statuses=["open"]))
+        with one_listing():
+            snapshot = self.reads.system_snapshot()
+            pause = self._or_reason(self.pause_reads.pause_state)
+            sprints = self._or_reason(lambda: self.sprint_reads.sprint_list(statuses=["open"]))
         # A count only, so no token; an unavailable PO store just hides it.
         po = self._or_reason(self.po.po_running_count) if self.po is not None else None
         return _html(200, pages.dashboard(snapshot, pause=pause, sprints=sprints, po=po))
@@ -561,15 +563,18 @@ class WebApp:
         return _html(200, pages.projects_page(self.reads.system_snapshot()))
 
     def _project_page(self, params, _query, _body) -> Response:
-        snapshot = self.reads.system_snapshot()
-        projects = (snapshot.get("projects") or {}).get("items") or []
-        if not any(
-            str(item.get("id") or "") == params["project"] for item in projects if isinstance(item, dict)
-        ):
-            return _html(
-                404, pages.error(404, "project_not_found", f"project {params['project']} is not registered")
-            )
-        sprints = self._or_reason(lambda: self.sprint_reads.sprint_list(statuses=None))
+        # The current cards and the sprints' cards share one listing.
+        with one_listing():
+            snapshot = self.reads.system_snapshot()
+            projects = (snapshot.get("projects") or {}).get("items") or []
+            if not any(
+                str(item.get("id") or "") == params["project"] for item in projects if isinstance(item, dict)
+            ):
+                return _html(
+                    404,
+                    pages.error(404, "project_not_found", f"project {params['project']} is not registered"),
+                )
+            sprints = self._or_reason(lambda: self.sprint_reads.sprint_list(statuses=None))
         markup = pages.project_page(snapshot, project_id=params["project"], sprints=sprints)
         return _html(200, markup)
 
