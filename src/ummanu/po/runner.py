@@ -1155,6 +1155,17 @@ class PoRunner:
                 file=sys.stderr,
             )
             return None
+        if cli == "codex":
+            # Before the switch commits: a codex launch with no login would fail the turn on codex.
+            try:
+                self.codex_home()
+            except CodexHomeLoginMissing as exc:
+                print(
+                    f"ummanu po: turn {session.session_id}/{seq} refused by {session.cli} ({failure.summary}); "
+                    f"codex cannot run it ({exc}), so the turn fails",
+                    file=sys.stderr,
+                )
+                return None
         with self.admission.locked(), self._lock:
             if self.store.turn(session.session_id, seq).state != RUNNING:
                 return None
