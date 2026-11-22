@@ -324,15 +324,25 @@ class BarLayoutTests(RouteFixture):
         self.assertIn("body { padding-bottom: var(--bar-height); }", page_assets.STYLE)
         self.assertIn("height: var(--bar-height)", page_assets.STYLE)
 
-    def test_the_bar_keeps_one_line_at_any_width_so_the_reserved_height_stays_true(self) -> None:
+    def test_a_wide_bar_keeps_one_line_so_the_reserved_height_stays_true(self) -> None:
         row = re.search(r"\.statusbar \.row \{([^}]*)\}", page_assets.STYLE)
         assert row is not None
         self.assertIn("white-space: nowrap", row.group(1))
         self.assertIn("overflow-x: auto", row.group(1))
-        # The phone-width rule narrows the gutters; it must not reintroduce wrapping or a height.
-        phone = re.search(r"@media \(max-width: 600px\) \{ \.statusbar[^}]*\}", page_assets.STYLE)
-        assert phone is not None
-        self.assertNotIn("white-space", phone.group(0))
+
+    def test_a_narrow_bar_wraps_in_the_page_flow_so_nothing_on_it_is_cut_off(self) -> None:
+        narrow = re.search(r"@media \(max-width: 1100px\) \{\n(.*?)\n\}", page_assets.STYLE, re.DOTALL)
+        assert narrow is not None
+        rules = dict(re.findall(r"^\s*([^{\n]+?) \{([^}]*)\}", narrow.group(1), re.MULTILINE))
+        # In the flow and stuck to the bottom, the bar takes the height its rows need, so the page
+        # reserves none and no row slides under the viewport's edge.
+        self.assertIn("position: sticky", rules[".statusbar"])
+        self.assertIn("height: auto", rules[".statusbar"])
+        self.assertIn("padding-bottom: 0", rules["body"])
+        self.assertIn("flex-wrap: wrap", rules[".statusbar .row"])
+        self.assertIn("overflow-x: visible", rules[".statusbar .row"])
+        # The row no longer scrolls, so the credits pop can hang off the bar instead of the viewport.
+        self.assertIn("position: absolute", rules[".statusbar .credits-pop"])
 
     def test_the_po_composer_sits_above_the_bar_rather_than_under_it(self) -> None:
         page = self.get("/po/sessions/s-1")
