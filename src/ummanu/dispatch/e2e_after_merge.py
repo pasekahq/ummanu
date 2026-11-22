@@ -963,7 +963,12 @@ def _create_wait(runtime: Any, project: str, carrier_ref: str, state: E2eState, 
         ),
         target="ready",
         sprint=sprint,
-        **({"dod_item": carrier["dod_item"]} if sprint and carrier.get("dod_item") else {}),
+        # The item names a DoD line of the carrier's sprint only; another sprint's item is not guessed.
+        **(
+            {"dod_item": carrier["dod_item"]}
+            if sprint and carrier.get("dod_item") and carrier.get("sprint") == sprint
+            else {}
+        ),
         wait={"run": run.run_url, "deadline": run.deadline, "returns": [wait_card.CARD_PREFIX + carrier_ref]},
         request_id=stage_request_id("e2e-wait", run.dispatch_id),
     )
