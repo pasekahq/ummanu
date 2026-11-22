@@ -334,7 +334,7 @@ def _sprint_board(client: SqlCardClient, *, create: bool) -> int | None:
 
 
 class _AuditOnce:
-    """Share supplied audit events or cache slices from the card client's audit owner."""
+    """Share supplied events or cache slices of the client's own audit, never a data-dir journal."""
 
     def __init__(
         self,
@@ -365,7 +365,7 @@ class _AuditOnce:
 
 
 def audit_traversal(events: list[dict[str, Any]]) -> _AuditOnce:
-    """Traverse supplied committed events without opening another audit source."""
+    """Traverse events a caller walked itself, so a refusal is the journal's, not the board's."""
     return _AuditOnce(events=events)
 
 
@@ -426,7 +426,7 @@ class SprintReader:
                 comments=None,
                 include_resume_freshness=False,
             )
-            sprint.pop("resume_freshness", None)
+            sprint.pop("resume_freshness", None)  # judged only with the linked cards, unread here
             if statuses and sprint["status"] not in statuses:
                 continue
             result.append(sprint)
@@ -453,7 +453,7 @@ class SprintReader:
                 comments=comments,
                 include_resume_freshness=False,
             )
-            sprint.pop("resume_freshness", None)
+            sprint.pop("resume_freshness", None)  # judged only with the linked cards, unread here
             result.append(sprint)
         return sorted(result, key=lambda sprint: (sprint["ref"], sprint["id"]))
 
@@ -542,8 +542,8 @@ class SprintReader:
             "repositories": repositories,
             **_ownership(meta),
             **_observer(meta),
-            "executors": stored_executors(meta),
-            "po_session": meta.get(PO_SESSION_FIELD) or None,
+            "executors": stored_executors(meta),  # both roles, each with a state, never a missing key
+            "po_session": meta.get(PO_SESSION_FIELD) or None,  # never inferred for an older sprint
             "allowed_productions": owner_decisions.productions(_json_list(meta.get(ALLOWED_PRODUCTIONS_FIELD)), decisions),
             "local_run_exceptions": local_run_exceptions,
             "e2e": sprint_e2e.sprint_budget(meta),
@@ -554,6 +554,7 @@ class SprintReader:
                 "created_at": _rfc3339(raw.get("date_creation")),
                 "updated_at": _rfc3339(raw.get("date_modification")),
                 "backend": {"kind": BOARD_STORE_KIND, "store_ref": _text(raw.get("reference"))},
+                # A restored sprint's row dates describe the recovery; these are the dates it came from.
                 "source": read.source_audit.to_document() if read.source_audit is not None else None,
             },
         }
@@ -569,7 +570,7 @@ class SprintReader:
         return result
 
     def linked_cards(self, *, include_archived: bool = False) -> dict[str, list[dict[str, Any]]]:
-        """Group Pipeline cards by explicit sprint in one listing with batched metadata."""
+        """Group every sprint's Pipeline cards in one listing with batched metadata, not one per sprint."""
         linked: dict[str, list[dict[str, Any]]] = {}
         reader = TaskReader(self.client)
         cards = reader.list(include_archived=True) if include_archived else select_cards(reader)
@@ -672,7 +673,7 @@ class SprintReader:
             "cards": {key: sorted(value) for key, value in sorted(states.items())},
             "budget": sprint["budget"],
             "dod": sprint["dod"],
-            "resume": sprint.get("resume"),
+            "resume": sprint.get("resume"),  # the decision beside its freshness, so no second read
             "resume_freshness": sprint["resume_freshness"],
             "stop_reason": "budget_hard_limit" if sprint["status"] == "stopped" else None,
             "observer": observer or {"state": "unknown"},
@@ -682,7 +683,7 @@ class SprintReader:
             "owner_decisions": list(sprint.get("owner_decisions") or []),
             "local_run_exceptions": sprint.get("local_run_exceptions", []),
             "e2e": sprint.get("e2e") or sprint_e2e.sprint_budget({}),
-            "degraded_cards": {
+            "degraded_cards": {  # any column: "3 in progress" with no worker reads as moving
                 reference: detail
                 for reference, detail in sorted((headless or {}).items())
                 if any(reference in refs for refs in states.values())
@@ -2195,6 +2196,7 @@ class SprintWriter(SprintLifecycleMixin):
         self.client._execute("SELECT ref FROM sprints WHERE ref = %s FOR UPDATE", (reference,))
         known = self.audit.committed_event(request_id) or self.audit.pending_event(request_id)
         if known is not None:
+            # A replay is matched on what the caller asked; `recorded` facts were read at the first write.
             asked = {key: (known.get("payload") or {}).get(key) for key in payload}
             if (known.get("kind"), known.get("ref"), asked) != (kind, reference, payload):
                 raise TaskError("validation", "request id already belongs to another sprint write", 2)
@@ -2206,7 +2208,7 @@ class SprintWriter(SprintLifecycleMixin):
             cards = TaskReader(self.client).list(sprint=reference, include_archived=True)
             if any(card.get("dod_item") == payload["item"] for card in cards):
                 raise TaskError("validation", "manual in-main evidence is forbidden for an item with linked cards", 2)
-        try:
+        try:  # refuse a change the items cannot take before anything is staged
             change(items, {"role": role, "actor": actor, "at": _now()})
             if recorded is not None:
                 payload = {**payload, **recorded(items)}
@@ -2474,12 +2476,10 @@ class SprintWriter(SprintLifecycleMixin):
                 budget_by_type=counts,
             )
         except TaskError:
-            # A generic charge may wait only on the exact typed occurrence
-            # that owns the state effect.  If staging/effect admission failed
-            # before that occurrence survived, retain neither record: the
-            # released generic write discarded on every failed mutation, and
-            # otherwise this request can become stranded once the Sprint
-            # changes state through another command.
+            # A generic charge may wait only on the exact typed occurrence that owns the state effect.
+            # If staging/effect admission failed before that occurrence survived, retain neither record:
+            # the released generic write discarded on every failed mutation, and otherwise this request
+            # can become stranded once the Sprint changes state through another command.
             typed_request_id = request_id + ":typed-hard-stop"
             if self.audit.event(typed_request_id) is None:
                 self.audit.discard(request_id, event)
@@ -2864,7 +2864,7 @@ def _sprint_number(sprint: SprintWriteSnapshot | dict[str, Any] | None) -> int:
 
 
 def _is_sprint_row(raw: Any) -> bool:
-    """Only a sprint reference identifies a completed sprint-board row."""
+    """A create writes the reference last: a row without one is an unfinished create, not a sprint."""
     return isinstance(raw, dict) and str(raw.get("reference") or "").startswith(SPRINT_REFERENCE_PREFIX)
 
 
@@ -2961,7 +2961,7 @@ def _timestamp(value: str) -> datetime | None:
 
 
 def _ownership(meta: dict[str, str]) -> dict[str, Any]:
-    """Expose ownership only where the stored row declares it."""
+    """Expose ownership only where the stored row declares it; a sprint older than ownership has none."""
     result: dict[str, Any] = {}
     if "sprint_product" in meta:
         result["product"] = meta["sprint_product"]
@@ -2973,7 +2973,7 @@ def _ownership(meta: dict[str, str]) -> dict[str, Any]:
 
 
 def _observer(meta: dict[str, str]) -> dict[str, Any]:
-    """Keep absent, valid and malformed stored observer declarations distinct."""
+    """Keep absent, valid and malformed stored observer declarations apart: their repairs differ."""
     if OBSERVER_FIELD not in meta:
         return {}
     return {"observer": parse_observer(meta[OBSERVER_FIELD])}
