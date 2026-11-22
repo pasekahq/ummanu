@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
+import unicodedata
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -135,7 +137,9 @@ def _module_of(relative: str) -> str:
     return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
 
 
-def _imported_modules(relative: str, imports: tuple[ast.Import | ast.ImportFrom, ...]) -> list[tuple[int, str]]:
+def _imported_modules(
+    relative: str, imports: tuple[ast.Import | ast.ImportFrom, ...]
+) -> list[tuple[int, str]]:
     """Every module an import statement names, relative ones resolved against the file's package."""
     module = _module_of(relative)
     package = module if relative.endswith("__init__.py") else module.rpartition(".")[0]
@@ -155,25 +159,47 @@ def _imported_modules(relative: str, imports: tuple[ast.Import | ast.ImportFrom,
     return found
 
 
+_OWNER_DOTTED = re.compile(r"\.fake(?!\w)")
+_OWNER_FROM = re.compile(r"ummanu\.board[\s\\]+import(?!\w)")
+
+
+def _spells(pattern: re.Pattern[str], text: str) -> bool:
+    """Whether `text`, or its NFKC form where identifiers could hide, matches `pattern`."""
+    return bool(pattern.search(text)) or (
+        not text.isascii() and bool(pattern.search(unicodedata.normalize("NFKC", text)))
+    )
+
+
 def _board_fake_offenders(relative: str, source: str) -> list[str]:
     """Retired imports, product test dependencies and misplaced host definitions."""
     product = relative.startswith("src/")
+    # Outside the product only a FakeBoardHost definition or a target naming `ummanu.board.fake`
+    # offends. Such a target spells `.fake` (absolute, relative or as a call's package) or is
+    # `from ummanu.board import fake`; a file that can spell no offence is not parsed at all.
+    dotted_owner = _spells(_OWNER_DOTTED, source)
+    if (
+        not product
+        and not dotted_owner
+        and not source_trees.may_name(source, ("FakeBoardHost",))
+        and not (_spells(_OWNER_FROM, source) and source_trees.may_name(source, ("fake",), whole=True))
+    ):
+        return []
     tree = source_trees.parse(source, filename=relative)
     imports = source_trees.imports(tree)
     targets = _imported_modules(relative, imports)
     aliases = {
-        alias.asname or alias.name: alias.name.rpartition(".")[2]
-        for node in imports
-        for alias in node.names
+        alias.asname or alias.name: alias.name.rpartition(".")[2] for node in imports for alias in node.names
     }
     offenders = []
     if relative == "src/ummanu/board/fake.py":
         offenders.append(f"{relative}: retired product location")
     # Imports need only statement traversal. A full expression walk is needed only when a host
     # class, or a dynamic import/patch call with a target this guard refuses, can be spelled here.
-    classes = "class" in source and source_trees.may_name(source, ("FakeBoardHost", "MemoryAudit"))
-    calls = source_trees.may_name(source, ("import_module", "__import__", "patch")) and source_trees.may_name(
-        source, ("fake", "tests") if product else ("fake",), whole=True
+    classes = "class" in source and source_trees.may_name(
+        source, ("FakeBoardHost", "MemoryAudit") if product else ("FakeBoardHost",)
+    )
+    calls = source_trees.may_name(source, ("import_module", "__import__", "patch")) and (
+        source_trees.may_name(source, ("fake", "tests"), whole=True) if product else dotted_owner
     )
     for node in source_trees.walk(tree) if classes or calls else ():
         if isinstance(node, ast.ClassDef) and (
@@ -236,12 +262,32 @@ class SourceLayoutTests(unittest.TestCase):
         for relative, source in (
             ("tests/probe.py", "from unittest import mock\nmock.patch('ummanu.dispatch.fakes.clock')\n"),
             ("src/ummanu/probe.py", "import importlib\nimportlib.import_module('ummanu.board.models')\n"),
+            # Outside the product only a target naming `ummanu.board.fake` or a FakeBoardHost offends.
+            (
+                "tests/probe.py",
+                "from unittest import mock\nfrom tests.fakes.board import FakeBoardHost\nfake = mock.patch('tests.x')\n",
+            ),
+            ("tests/probe.py", "from tests.fakes.board import MemoryAudit\nclass Probe(MemoryAudit): pass\n"),
         ):
             with (
                 self.subTest(relative=relative, source=source),
                 mock.patch.object(
                     source_trees, "walk", side_effect=AssertionError("unnecessary expression walk")
                 ),
+            ):
+                self.assertEqual(_board_fake_offenders(relative, source), [])
+
+    def test_board_double_parses_no_test_file_that_cannot_name_a_refused_target(self) -> None:
+        for relative, source in (
+            (
+                "tests/probe.py",
+                "from ummanu.board.models import Event\nfrom tests.fakes.board import MemoryAudit\n",
+            ),
+            ("scripts/probe.py", "fake = 'ummanu.dispatch.fakes'\n"),
+        ):
+            with (
+                self.subTest(relative=relative, source=source),
+                mock.patch.object(source_trees, "parse", side_effect=AssertionError("unnecessary parse")),
             ):
                 self.assertEqual(_board_fake_offenders(relative, source), [])
 
@@ -254,14 +300,14 @@ class SourceLayoutTests(unittest.TestCase):
             ["MemoryAudit", "FakeBoardHost"],
         )
         offenders = []
-        for directory in ("src", "tests", "scripts"):
-            naming = (
-                ("fake", "FakeBoardHost", "MemoryAudit", "tests")
-                if directory == "src"
-                else ("ummanu.board", "FakeBoardHost")
-            )
-            for path, _tree in source_trees.modules(ROOT / directory, naming=naming):
-                offenders.extend(_board_fake_offenders(path.relative_to(ROOT).as_posix(), path.read_text()))
+        naming = ("fake", "FakeBoardHost", "MemoryAudit", "tests")
+        for path, _tree in source_trees.modules(ROOT / "src", naming=naming):
+            offenders.extend(_board_fake_offenders(path.relative_to(ROOT).as_posix(), path.read_text()))
+        # The guard itself skips, unparsed, every test or script file that cannot offend.
+        for directory in ("tests", "scripts"):
+            for path in sorted((ROOT / directory).rglob("*.py")):
+                text = path.read_text(encoding="utf-8")
+                offenders.extend(_board_fake_offenders(path.relative_to(ROOT).as_posix(), text))
         self.assertEqual(offenders, [])
 
     def test_board_double_guard_detects_planted_imports_and_locations(self) -> None:
@@ -277,6 +323,10 @@ class SourceLayoutTests(unittest.TestCase):
             ("tests/probe.py", "import importlib as loader\nloader.import_module('.fake', 'ummanu.board')\n"),
             ("tests/probe.py", "from unittest.mock import patch as p\np('ummanu.board.fake.uuid')\n"),
             ("tests/fakes/duplicate.py", "class FakeBoardHost: pass\n"),
+            ("tests/probe.py", "def probe():\n    class FakeBoardHost: pass\n"),
+            ("tests/probe.py", "import importlib\nimportlib.import_module('..board.fake', 'ummanu.cli')\n"),
+            ("tests/probe.py", "from ummanu.board import (\n    models,\n    fake as owner,\n)\n"),
+            ("scripts/probe.py", "from ummanu.board import \\\n    \uff46\uff41\uff4b\uff45\n"),
             ("src/ummanu/probe.py", "class MemoryAudit: pass\n"),
         ):
             with self.subTest(relative=relative, source=source):
