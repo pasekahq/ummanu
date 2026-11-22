@@ -160,6 +160,26 @@ class CardCancelTests(CancelFixture, unittest.TestCase):
         self.assertFalse(self.reader.show(CARD_REF)["closed"])
         self.assertTrue(self.cancel("cancel-held")["task"]["closed"])
 
+    def test_a_deferral_inside_the_archive_write_reports_an_unknown_outcome_and_a_repeat_settles_it(self) -> None:
+        write = self.writer._write
+
+        def commit_lands_then_defers(*args, **kwargs):
+            write(*args, **kwargs)
+            raise card_cancel._ALLOWANCE.get().defer("the board COMMIT")
+
+        with (
+            mock.patch.object(self.writer, "_write", side_effect=commit_lands_then_defers),
+            self.assertRaises(TaskError) as raised,
+        ):
+            self.cancel("cancel-ambiguous")
+
+        self.assertEqual(raised.exception.code, "card_busy")
+        self.assertIn("outcome is unknown", raised.exception.message)
+        self.assertIn("repeat the same request id", raised.exception.message)
+        self.assertNotIn("nothing was archived", raised.exception.message)
+        self.assertTrue(self.reader.show(CARD_REF)["closed"])
+        self.assertTrue(self.cancel("cancel-ambiguous")["replayed"])
+
     def test_a_lock_held_after_the_archive_commits_is_reported_as_pending_and_a_repeat_finishes(self) -> None:
         self.runtime.production_state.save(
             {"version": 1, "phase": "production", "owner": self.runtime.owner,
