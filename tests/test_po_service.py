@@ -2769,7 +2769,7 @@ class ProviderFallbackTests(ServiceFixture):
         self.assertEqual(self.store().session(session_id).cli, "claude")
 
     def test_codex_without_a_managed_login_is_not_tried_and_the_session_stays(self) -> None:
-        # issue:accf8451ab7e8b41184f: the switch to codex was committed before its launch found no
+        # The switch to codex was committed before its launch found no
         # login, so the turn failed with the session left on codex and no fallback notice.
         service = self.service(models=MODELS)
         session_id = self.session(service, "claude", "opus")
