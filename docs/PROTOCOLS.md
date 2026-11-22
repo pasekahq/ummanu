@@ -1464,7 +1464,9 @@ of a gate query, both sides of release, and worktree removal. It runs the fixed 
 interpreter in isolated mode and classifies `interpreter_unavailable`, `missing_import`, `wrong_root`
 and `workspace_targeted_editable` (plain editable paths, executable editable finder modules named by
 `.pth`, and `direct_url.json`, including vanished paths under either workspaces root: the Orca
-workspaces root of A20 steps 8 and 11, `~/orca/workspaces`, and `<data_dir>/workspaces`). Any
+workspaces root of A20 steps 8 and 11, `~/orca/workspaces`, and `<data_dir>/workspaces`). A
+preflight child cut short by its deadline is `preflight_timeout` and one that prints no provenance
+object is `preflight_invalid_payload`, so neither reads as a missing interpreter. Any
 refusal becomes durable blocked evidence and keeps the checkout; installation metadata is never
 repaired implicitly.
 
