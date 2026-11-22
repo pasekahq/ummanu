@@ -28,6 +28,7 @@ from ummanu.cli import main
 from ummanu.config import validate
 from ummanu.dispatch.gate_receipt import mint_gate_receipt
 from ummanu.dispatch.state import REVIEW_REJECTION_REASON
+from ummanu.web import page_assets
 from ummanu.web.app import WebApp
 from ummanu.web.page_card import task as task_page
 from ummanu.webproto.reads import ReadLayer
@@ -578,6 +579,47 @@ class PipelineDisplayTests(unittest.TestCase):
         self.assertEqual(result["head_changes"], [{"at": "2026-01-01T00:00:00Z", "request_id": "change-1", **payload}])
         self.assertEqual([call.args[0] for call in reads.call_args_list].count(self.path), 1)
         self.assertEqual(result["pipeline"]["ci"]["status"], "pending")
+
+
+def style_rule(selector: str, *, media: str | None = None) -> str:
+    """The declarations of `selector`'s rule in the served stylesheet, inside `media` when given."""
+    scope = page_assets.STYLE
+    if media is not None:
+        block = re.search(rf"@media {re.escape(media)} \{{\n(.*?)\n\}}", scope, re.DOTALL)
+        assert block is not None, media
+        scope = block.group(1)
+    rule = re.search(rf"^\s*{re.escape(selector)} \{{([^}}]*)\}}", scope, re.MULTILINE)
+    assert rule is not None, selector
+    return rule.group(1)
+
+
+def pixels(declarations: str, name: str) -> float:
+    value = re.search(rf"(?:^|;)\s*{name} ([0-9.]+)px", declarations)
+    assert value is not None, name
+    return float(value.group(1))
+
+
+class LayoutTests(unittest.TestCase):
+    def test_four_full_columns_and_six_empty_ones_fit_a_1229_px_window(self) -> None:
+        column = style_rule(".board-column")
+        # A full column shrinks below its width when the board is short of room.
+        self.assertIn("flex: 0 1 284px", column)
+        empty = style_rule(".board-column-empty")
+        self.assertIn("min-width: 0", empty)
+        gutters, gaps, scrollbar = 2 * 20, 9 * 8, 16
+        needed = 4 * pixels(column, "min-width:") + 6 * pixels(empty, "flex: 0 0") + gaps
+        self.assertLessEqual(needed, 1229 - gutters - scrollbar)
+
+    def test_on_a_desktop_the_filter_keeps_one_line_and_shortens_what_it_shows(self) -> None:
+        desktop = "(min-width: 901px)"
+        form = style_rule("form.board-filter", media=desktop)
+        self.assertIn("flex-wrap: nowrap", form)
+        # Narrower than the lead by the heading, so it shares the heading's row.
+        self.assertIn("max-width: calc(100% - ", form)
+        active = style_rule(".board-filter-active", media=desktop)
+        self.assertIn("min-width: 0", active)
+        self.assertIn("text-overflow: ellipsis", active)
+        self.assertIn("white-space: nowrap", style_rule(".board-filter > a", media=desktop))
 
 
 class FilterTests(unittest.TestCase):

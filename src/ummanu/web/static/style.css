@@ -523,8 +523,10 @@ form.sprint .hint { color: var(--muted); font-size: .8rem; }
    column collapsed to its upright header. On a desktop screen tall enough the page fills the viewport
    and each column scrolls its own tiles, so the board's scrollbar stays on screen; on a shorter one the
    page scrolls the header and filter away and leaves the board the viewport above the bar. A narrow
-   screen stacks the columns into one list. Tile rules stay under .board: the sprint page owns .tiles
-   and .tile */
+   screen stacks the columns into one list. A full column gives up width down to a floor before the
+   board scrolls, so a usual mix of full and empty columns fits a laptop screen. On a desktop the
+   filter keeps one line beside the heading and shortens its "showing" text rather than wrapping.
+   Tile rules stay under .board: the sprint page owns .tiles and .tile */
 body.fit-viewport .top .row, body.fit-viewport main { max-width: none; }
 .board-lead { align-items: center; gap: .5rem 1rem; margin-bottom: .75rem; }
 .board-filter { align-items: center; gap: .5rem .75rem; font-size: 13px; }
@@ -537,7 +539,7 @@ body.fit-viewport .top .row, body.fit-viewport main { max-width: none; }
 .board-note .muted { color: var(--faint); }
 .board-note .age { margin-left: .5rem; font-size: inherit; }
 .board { display: flex; gap: .5rem; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: .5rem; }
-.board-column { flex: 0 0 284px; min-width: 0; display: flex; flex-direction: column; background: color-mix(in srgb, var(--raised) 60%, transparent); border-radius: var(--r-lg); padding: 0 .4rem .4rem; scroll-snap-align: start; }
+.board-column { flex: 0 1 284px; min-width: 200px; display: flex; flex-direction: column; background: color-mix(in srgb, var(--raised) 60%, transparent); border-radius: var(--r-lg); padding: 0 .4rem .4rem; scroll-snap-align: start; }
 .board-column > header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: .45rem; min-height: 38px; padding: 0 .35rem; }
 .board-column > header h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
 .board-column > header .count { font: 12px/18px var(--mono); color: var(--muted); padding: 0 6px; border-radius: 999px; background: var(--surface); }
@@ -547,7 +549,7 @@ body.fit-viewport .top .row, body.fit-viewport main { max-width: none; }
 .board-column > header .dot.tone-bad { border-color: var(--bad); background: var(--bad); }
 .board-column > header .dot.tone-accent { border-color: var(--accent); }
 .board-column > header .dot.tone-violet { border-color: var(--violet); }
-.board-column-empty { flex: 0 0 40px; writing-mode: vertical-lr; padding: .35rem 0; align-items: center; background: transparent; border: 1px dashed var(--line); }
+.board-column-empty { flex: 0 0 40px; min-width: 0; writing-mode: vertical-lr; padding: .35rem 0; align-items: center; background: transparent; border: 1px dashed var(--line); }
 .board-column-empty > header { padding: .35rem 0; min-height: 0; }
 .board-column-empty > header h2, .board-column-empty > header .count { color: var(--faint); }
 .board-column-empty > header .count { background: transparent; padding: 0; }
@@ -584,6 +586,9 @@ body.fit-viewport .top .row, body.fit-viewport main { max-width: none; }
 @media (min-width: 901px) {
   body.fit-viewport main { padding-block: 1rem .75rem; }
   .board ol.tiles { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+  form.board-filter { flex-wrap: nowrap; min-width: 0; max-width: calc(100% - 5rem); }
+  .board-filter-active { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .board-filter > a { white-space: nowrap; }
 }
 @media (min-width: 901px) and (min-height: 600px) {
   body.fit-viewport { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
