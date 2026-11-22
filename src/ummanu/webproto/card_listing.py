@@ -1,11 +1,4 @@
-"""One Pipeline listing per rendered response, for a page whose reads would otherwise list it twice.
-
-The dashboard and a project page carry the current cards (`ReadLayer.system_snapshot`) and every
-sprint's cards (`SprintReadLayer.sprint_list`). Inside :func:`one_listing` both take their rows
-from one `TaskReader.list(include_archived=True)`: the current cards are its open rows in the
-current states, in the order the listing already has. Outside it each read lists for itself, as
-before, so a page or command with one reader never pays for the archive.
-"""
+"""One Pipeline listing per request for a page with two card readers; outside a pin each reads alone."""
 
 from __future__ import annotations
 
@@ -33,8 +26,7 @@ def one_listing() -> Iterator[None]:
 
 
 def linked_cards(reader: SprintReader) -> dict[str, list[dict[str, Any]]]:
-    """Every card grouped by its sprint: `reader.linked_cards(include_archived=True)`, or the same
-    grouping of the pinned listing."""
+    """`reader.linked_cards(include_archived=True)`, or the same grouping of the pinned listing."""
     pin = _PIN.get()
     if pin is None:
         return reader.linked_cards(include_archived=True)
@@ -53,7 +45,7 @@ def current_cards(client: Any, states: Collection[str]) -> list[dict[str, Any]]:
 
 
 def _pinned(pin: dict[str, list[dict[str, Any]]], client: Any) -> list[dict[str, Any]]:
-    """The pinned listing, read on first use. A refused listing is not pinned: the next read asks again."""
+    """The pinned listing, read on first use; a refusal is not pinned."""
     if "cards" not in pin:
         pin["cards"] = TaskReader(client).list(include_archived=True)
     return pin["cards"]
