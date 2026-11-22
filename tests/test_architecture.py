@@ -137,9 +137,7 @@ def _module_of(relative: str) -> str:
     return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
 
 
-def _imported_modules(
-    relative: str, imports: tuple[ast.Import | ast.ImportFrom, ...]
-) -> list[tuple[int, str]]:
+def _imported_modules(relative: str, imports: tuple[ast.Import | ast.ImportFrom, ...]) -> list[tuple[int, str]]:
     """Every module an import statement names, relative ones resolved against the file's package."""
     module = _module_of(relative)
     package = module if relative.endswith("__init__.py") else module.rpartition(".")[0]
@@ -188,7 +186,9 @@ def _board_fake_offenders(relative: str, source: str) -> list[str]:
     imports = source_trees.imports(tree)
     targets = _imported_modules(relative, imports)
     aliases = {
-        alias.asname or alias.name: alias.name.rpartition(".")[2] for node in imports for alias in node.names
+        alias.asname or alias.name: alias.name.rpartition(".")[2]
+        for node in imports
+        for alias in node.names
     }
     offenders = []
     if relative == "src/ummanu/board/fake.py":
