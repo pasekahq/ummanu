@@ -60,6 +60,8 @@ class _Progress:
     """How far one cancel got, for a refusal to say truthfully what it left behind."""
 
     asked: list[str] = field(default_factory=list)
+    # The archive transaction was started; until it answers, its COMMIT may or may not have landed.
+    writing: bool = False
     archived: str = ""
 
 
@@ -268,6 +270,7 @@ def _cancel_held(
             raise _CommittedWriteError() from exc
 
     identity = {"reason_sha256": _digest(reason), **({"successor": successor} if successor else {})}
+    progress.writing = True
     result = writer._write(
         SUPERSEDED if successor else CANCELLED, role.value, actor, reference, request_id, event_payload,
         mutation, identity=identity, retry_payload={"reason": reason},
@@ -467,6 +470,14 @@ def _busy(reference: str, allowance: Allowance, progress: _Progress) -> TaskErro
         if progress.asked
         else "nothing was stopped"
     )
+    if progress.writing:
+        return TaskError(
+            "card_busy",
+            f"{reference}: the cancel's outcome is unknown: its archive was being written when the "
+            f"{allowance.seconds:g} s ran out ({held}), so it may have committed; {after}; repeat the "
+            "same request id to settle it",
+            3,
+        )
     return TaskError(
         "card_busy",
         f"{reference} was not cancelled within {allowance.seconds:g} s: {held}; "

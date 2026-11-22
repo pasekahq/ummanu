@@ -1616,8 +1616,10 @@ allowance spent on a held lock, in any step, is `card_busy` and names the lock f
 stop the runtime does not confirm is `head_stop_unconfirmed` and names the run and the runtime's
 reason; the record and the cleanup intent keep the heads. After step 3 has committed, a held lock or a
 failure answers that the card is archived and that steps 4 and 5 are still pending (`card_busy` with
-the holder, `cancel_pending` with the failure). A repeat of the request id replays the committed cancel
-and finishes steps 4 and 5. A wait card that still waits keeps its
+the holder, `cancel_pending` with the failure). An allowance spent while step 3's transaction is being
+written is `card_busy` saying that the outcome is unknown, since its commit may have landed. A repeat of
+the request id replays the committed cancel and finishes steps 4 and 5, or settles an unknown outcome.
+A wait card that still waits keeps its
 `cancelled` delivery instead ([Wait cards](#wait-cards)).
 
 ```bash
