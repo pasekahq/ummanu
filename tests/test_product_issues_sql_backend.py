@@ -429,7 +429,8 @@ class SqlIssueDescriptionEditTests(ProductIssueFixture, unittest.TestCase):
                                        ["--description", "a", "--body-file", str(invalid)])):
             self.assertEqual(self.invoke(issue["ref"], flags, request_id=f"bad-{index}")[0], 2)
             self.assertEqual(self._claims(f"bad-{index}"), (0, 0))
-        for role, expected in (("observer", 3), ("dispatcher", 2)):
+        # The CLI offers only `--role po` for `issue edit`; the store refuses the observer itself.
+        for role, expected in (("observer", 2), ("dispatcher", 2)):
             self.assertEqual(self.invoke(issue["ref"], ["--description", "wrong"], role=role,
                                          request_id=role)[0], expected)
             self.assertEqual(self._claims(role), (0, 0))

@@ -2087,9 +2087,9 @@ Who writes what:
 | --- | --- | --- |
 | `product create`, `product edit` | yes | not offered |
 | `issue create` | yes, any product (`--product` required) | yes, under the [identity guard](#the-sprint-guard), for its sprint's product |
-| `issue update-priority`, `issue append`, `issue edit` | yes | `role_forbidden` |
-| `issue close` | yes | `role_forbidden` (an observer's `sprint close` closes its sprint's declared issues on its verdicts, in its name) |
-| `issue reopen` | yes | `role_forbidden` |
+| `issue update-priority`, `issue append`, `issue edit` | yes | not offered |
+| `issue close` | yes | not offered (an observer's `sprint close` closes its sprint's declared issues on its verdicts, in its name) |
+| `issue reopen` | yes | not offered |
 | `task move` of a Product or Issue | `transition_forbidden` | `role_forbidden` |
 | `task edit` of a Product or Issue | `edit_forbidden` | `role_forbidden` |
 | `task cancel` of a Product or Issue | `transition_forbidden` | `role_forbidden` |

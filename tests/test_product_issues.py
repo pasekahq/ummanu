@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import contextlib
 import hashlib
 import io
@@ -11,7 +12,7 @@ from unittest import mock
 
 from tests.observer_identity import as_observer
 from tests.product_issue_fixtures import ProductIssueFixture
-from ummanu.cli import main
+from ummanu.cli import build_parser, main
 from ummanu.tasks import TaskError, TaskWriter
 
 
@@ -894,6 +895,26 @@ class ProductIssueDescriptionAppendTests(ProductIssueFixture, unittest.TestCase)
         self.assertEqual(self.issue(issue["ref"])["description"], shown["description"])
         self.assertEqual([event["request_id"] for event in self._updates(issue["ref"])], ["cli"])
 
+
+
+class IssueRoleChoiceTests(unittest.TestCase):
+    """`--role` offers only the roles the store admits for the command, so help never offers a refusal."""
+
+    def role_choices(self, command: str) -> tuple[str, ...]:
+        parser: argparse.ArgumentParser = build_parser(["issue", command])
+        for name in ("issue", command):
+            [subparsers] = [
+                action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
+            ]
+            parser = subparsers.choices[name]
+        [role] = [action for action in parser._actions if "--role" in action.option_strings]
+        return tuple(role.choices or ())
+
+    def test_only_create_offers_the_observer(self) -> None:
+        self.assertEqual(self.role_choices("create"), ("po", "observer"))
+        for command in ("update-priority", "append", "edit", "close", "reopen"):
+            with self.subTest(command=command):
+                self.assertEqual(self.role_choices(command), ("po",))
 
 
 class ProductProjectEditTests(ProductIssueFixture, unittest.TestCase):
