@@ -15,6 +15,7 @@ import ummanu
 from ummanu.candidate_history import (
     Commit,
     ai_attributions,
+    forbidden_identity,
     parse_shas,
     repair_message,
     without_ai_attribution,
@@ -104,6 +105,30 @@ class CandidateHistoryTests(unittest.TestCase):
         ]
 
         self.assertEqual(ai_attributions(commits), [])
+
+    def test_a_registered_agent_address_with_a_model_name_is_an_agent(self) -> None:
+        for trailer, expected in (
+            (
+                "Claude Opus 5.5 <noreply@anthropic.com>",
+                "registered agent claude opus 5.5 <noreply@anthropic.com>",
+            ),
+            (
+                "Claude Fable 5.2 <noreply@anthropic.com>",
+                "registered agent claude fable 5.2 <noreply@anthropic.com>",
+            ),
+            ("Claude <noreply@anthropic.com>", "registered agent claude <noreply@anthropic.com>"),
+            ("Codex GPT-5.1 <codex@openai.com>", "registered agent codex gpt-5.1 <codex@openai.com>"),
+        ):
+            with self.subTest(trailer=trailer):
+                self.assertEqual(forbidden_identity(trailer), expected)
+        for human in (
+            "Claude Martin <claude.martin@human.example>",
+            "Claude Opus 5.5 <claude@personal.example>",
+            "Claude Martin <noreply@anthropic.com>",
+            "Claudette 5 <noreply@anthropic.com>",
+        ):
+            with self.subTest(human=human):
+                self.assertEqual(forbidden_identity(human), "")
 
     def test_vendor_employees_and_ambiguous_local_parts_stay_human(self) -> None:
         commits = [
