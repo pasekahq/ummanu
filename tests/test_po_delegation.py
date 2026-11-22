@@ -44,6 +44,7 @@ from ummanu.dispatch.origin_returns import (
     return_request_id,
     successor_request_id,
 )
+from ummanu.dispatch.worker_report import BLOCKED_RELAY
 from ummanu.po.client import ServiceUnavailable
 from ummanu.po.store import RequestConflict, SessionClosed, SessionNotFound
 from ummanu.tasks import TaskError, _po_card_create_refusal
@@ -275,7 +276,7 @@ class ReturnCase(unittest.TestCase):
         return self.board.move(
             ref,
             "blocked",
-            "worker report:blocked: the vendor API needs a key only the owner holds",
+            BLOCKED_RELAY,
             terminal_taxonomy={"disposition": "blocked", "blocked_reason": "external_fact"},
         )
 
@@ -377,9 +378,11 @@ class DeliveryTests(ReturnCase):
         text = sent["text"]
         self.assertIn(f"Card {REF} (research), which PO session {SESSION} cut", text)
         self.assertIn("settled Blocked.", text)
-        self.assertIn("## Why it is Blocked\n\nworker report:blocked: the vendor API needs a key", text)
+        # The dispatcher's move only relays the worker's report:blocked; the report is the reason.
+        self.assertIn("## Why it is Blocked\n\nThe vendor API needs a key only the owner holds.\n", text)
+        self.assertNotIn(BLOCKED_RELAY, text)
         self.assertIn("Classification: external_fact", text)
-        self.assertIn("## The worker's blocked report", text)
+        self.assertNotIn("## The worker's blocked report", text, "the report is quoted once")
         self.assertEqual(self.board.delivered()[event_id]["state"], "blocked")
         # A Blocked card is read each tick (it may be Blocked again), and sends nothing new.
         self.assertEqual(self.tick(), [])
@@ -544,7 +547,7 @@ class BacklogTests(ReturnCase):
         self.assertIn("settled Blocked.", sent["text"])
         self.assertIn("State: Blocked, at 2026-09-27T12:03:00Z", sent["text"])
         self.assertIn(
-            "## Why it is Blocked\n\nworker report:blocked: the vendor API needs a key", sent["text"]
+            "## Why it is Blocked\n\nThe vendor API needs a key only the owner holds.", sent["text"]
         )
         self.assertIn("Classification: external_fact", sent["text"])
 

@@ -42,6 +42,7 @@ from ummanu.board.production_rights import DELEGATED_RESULT_INPUT, card_facts
 from ummanu.board.task_protocol.rows import POST_MERGE_DISPOSITION_KEY
 from ummanu.dispatch.po_delivery import deliver, open_successor
 from ummanu.dispatch.state import request_token
+from ummanu.dispatch.worker_report import BLOCKED_RELAY
 from ummanu.kernel.errors import TaskError
 from ummanu.tasks import PO_SESSION_KEY, recorded_card_transition
 
@@ -265,10 +266,13 @@ def _result_lines(events: list[dict[str, Any]], index: int) -> list[str]:
         taxonomy = _data(terminal).get("terminal_taxonomy")
         blocked = taxonomy.get("blocked_reason") if isinstance(taxonomy, dict) else None
         classification = f"board: {blocked}" if blocked else "unclassified"
-    lines = ["## Why it is Blocked", "", _bounded(reason) or "(the Blocked move carries no reason)", ""]
-    lines.append(f"Classification: {classification}")
     body = str(report.get("body") or "").strip() if report is not None else ""
     kind = str(report.get("marker") or "").removeprefix("report:") if report is not None else ""
+    if reason == BLOCKED_RELAY and kind == "blocked" and body:
+        # The dispatcher's move only relays the worker's report:blocked, which carries the reason.
+        reason = body
+    lines = ["## Why it is Blocked", "", _bounded(reason) or "(the Blocked move carries no reason)", ""]
+    lines.append(f"Classification: {classification}")
     if kind in {"blocked", "partial"} and body and body != reason:
         lines += ["", f"## The worker's {kind} report", "", _bounded(body)]
     return lines
