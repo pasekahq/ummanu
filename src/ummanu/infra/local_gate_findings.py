@@ -65,7 +65,34 @@ def direct_test_runner(command: str) -> str | None:
         if program in {"pytest", "py.test"}:
             return "pytest"
         if program.startswith("python"):
-            for flag, module in zip(words[1:], words[2:]):
-                if flag == "-m" and module in {"pytest", "unittest"}:
-                    return module
+            runner = _interpreter_runner(words[1:])
+            if runner is not None:
+                return runner
+    return None
+
+
+def _interpreter_runner(args: list[str]) -> str | None:
+    """The runner the interpreter itself starts from its own `-m` or script, as `cpython.run_*` audits it.
+
+    Only the interpreter's options are read: words after its `-m X`, `-c`, `-` or script belong to that
+    program, so `python -m coverage run -m pytest` is not a direct runner.
+    """
+    words = iter(args)
+    for word in words:
+        if word == "--":
+            word = next(words, "")
+        elif word.startswith("--"):
+            if word == "--check-hash-based-pycs":
+                next(words, None)
+            continue
+        if word == "-" or not word.startswith("-"):
+            return "pytest" if Path(word).name in {"pytest", "py.test"} else None
+        for index, flag in enumerate(word[1:], start=2):
+            if flag in "cmWX":
+                value = word[index:] or next(words, "")
+                if flag == "c":
+                    return None
+                if flag == "m":
+                    return value if value in {"pytest", "unittest"} else None
+                break
     return None

@@ -773,11 +773,22 @@ class StatusCliTests(unittest.TestCase):
         cases = {
             ".venv/bin/python -m pytest tests": "pytest",
             "CI=1 python3 -P -m unittest discover": "unittest",
+            "python -W error -m pytest": "pytest",
+            "python -Werror -m pytest": "pytest",
+            "python -IP -X dev -mpytest": "pytest",
+            "python -mpytest": "pytest",
+            "python -Im unittest": "unittest",
+            "python /venv/bin/pytest -q": "pytest",
             "make lint; py.test -q": "pytest",
             "ruff check . | tee out && /opt/env/bin/pytest": "pytest",
             "ummanu check broad": None,
             "python3 -m tests.broad": None,
             "python -c 'import pytest'": None,
+            "python -m coverage run -m pytest": None,
+            "python run_tests.py -m pytest": None,
+            "python manage.py test -m unittest": None,
+            "python - -m pytest": None,
+            "python -IW error run.py -m pytest": None,
             "git diff --check HEAD": None,
         }
         self.assertEqual({command: direct_test_runner(command) for command in cases}, cases)
