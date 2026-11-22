@@ -67,6 +67,7 @@ from ummanu.webproto.section import Reading, SourceSet, render
 from ummanu.webproto.sprint_reads import (
     SECTIONS,
     SOURCE_CARDS,
+    SOURCE_JOURNAL,
     SOURCE_LIVENESS,
     SOURCE_SPRINTS,
     WAITING_BLOCKED,
@@ -970,6 +971,7 @@ class SprintWaitingTests(unittest.TestCase):
             [
                 Reading(SOURCE_SPRINTS, sources.available(now), (row, row)),
                 Reading(SOURCE_CARDS, sources.available(now), {SPRINT: [current] if current else []}),
+                Reading(SOURCE_JOURNAL, sources.available(now), []),
                 Reading(SOURCE_LIVENESS, sources.available(now), _Production({"records": records or {}}, {})),
             ]
         )
