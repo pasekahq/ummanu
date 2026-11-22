@@ -503,6 +503,14 @@ later commands and reparented children have no such ancestor. The hook does not 
 runner's membership checks, fixture environment, marker families or budgets. Refusal is command
 feedback; it introduces no review/CI classification, retry or restart-budget handling.
 
+The dispatcher's local gate (`validation.ci: local`) runs `validation.command` with `bash -lc` in the
+candidate workspace, without a wrapper ancestor, so a command that starts pytest or unittest itself
+(`.venv/bin/pytest`, `python -m pytest`, `python -m unittest`) is refused with 125 and the card goes
+red on its first gate. Such a gate must go through the receipt wrapper. The dispatcher unit's `PATH`
+has no virtualenv, so spell the wrapper by path:
+`"${UMMANU_REPO:-$HOME/ummanu}/.venv/bin/ummanu" check broad`. `ummanu doctor` reports each adapter
+whose local validation command starts a runner directly as `local_gate_direct_test_runner`.
+
 The acceptance boundary is the fresh report marker transaction: the writer validates the intact,
 complete green full receipt against the declared check set, interpreter, candidate imports and
 committed HEAD tree, then records a bounded admission snapshot with its SHA/tree binding.

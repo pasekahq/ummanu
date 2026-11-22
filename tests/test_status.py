@@ -770,6 +770,66 @@ class StatusCliTests(unittest.TestCase):
         )
         self.assertIn("must match [a-z0-9][a-z0-9-]*", invalid[0]["message"])
 
+    def test_doctor_reports_a_local_gate_that_runs_pytest_directly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            adapters = root / "adapters"
+            adapters.mkdir()
+            for name, command in (
+                ("direct", ".venv/bin/pytest -q && .venv/bin/ruff check ."),
+                ("wrapped", '"${UMMANU_REPO:-$HOME/ummanu}/.venv/bin/ummanu" check broad'),
+            ):
+                adapter = {
+                    "setup": {"commands": ["true"]},
+                    "smoke": {"command": "true"},
+                    "validation": {"ci": "local", "command": command},
+                    "artifact_policy": {"write_project_files": False},
+                }
+                (adapters / f"{name}.yaml").write_text(json.dumps(adapter), encoding="utf-8")
+            instance = root / "instance.yaml"
+            instance.write_text(
+                "version: 1\nname: test\n"
+                f"data_dir: {root / 'data'}\n"
+                "offsite:\n  instance_remote: git@example.invalid:x/y.git\n",
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = main(["doctor", "--offline", "--json", "--findings-only", "--instance", str(instance)])
+            payload = json.loads(output.getvalue())
+        self.assertEqual(code, 1, payload)
+        refused = [
+            finding for finding in payload["findings"] if finding["code"] == "local_gate_direct_test_runner"
+        ]
+        self.assertEqual([finding["adapter"] for finding in refused], ["direct"], payload)
+        self.assertIn("ummanu check broad", refused[0]["message"])
+
+    def test_local_gate_direct_test_runner_shapes(self):
+        from ummanu.infra.local_gate_findings import direct_test_runner
+
+        cases = {
+            ".venv/bin/python -m pytest tests": "pytest",
+            "CI=1 python3 -P -m unittest discover": "unittest",
+            "python -W error -m pytest": "pytest",
+            "python -Werror -m pytest": "pytest",
+            "python -IP -X dev -mpytest": "pytest",
+            "python -mpytest": "pytest",
+            "python -Im unittest": "unittest",
+            "python /venv/bin/pytest -q": "pytest",
+            "make lint; py.test -q": "pytest",
+            "ruff check . | tee out && /opt/env/bin/pytest": "pytest",
+            "ummanu check broad": None,
+            "python3 -m tests.broad": None,
+            "python -c 'import pytest'": None,
+            "python -m coverage run -m pytest": None,
+            "python run_tests.py -m pytest": None,
+            "python manage.py test -m unittest": None,
+            "python - -m pytest": None,
+            "python -IW error run.py -m pytest": None,
+            "git diff --check HEAD": None,
+        }
+        self.assertEqual({command: direct_test_runner(command) for command in cases}, cases)
+
     def test_doctor_json_reports_an_unresolved_divergence_even_offline(self):
         with tempfile.TemporaryDirectory() as tmp:
             data_dir = Path(tmp) / "data"
