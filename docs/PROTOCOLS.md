@@ -4988,7 +4988,7 @@ A listing item and the watched sprint's `work` are built by the same call over t
 | `degraded_cards` | `liveness` | `items: null`, never `{}` |
 | `ready_skips` | `liveness`, which also needs `sprints` and `cards` | `items: null`, never `{}` |
 | `checks` | `sprints` for `not_applicable`; `liveness` otherwise | `unknown`, sourced `sprints` or `liveness`; `card` still names the current card wherever the row answered |
-| `waiting` | `sprints`, then `cards`, then `liveness`, then `cards`, then `liveness` (below) | `unknown`, sourced by the first missing input, and its reason names the column the board *did* establish where it did |
+| `waiting` | `sprints`, then `cards`, then `liveness`, then `journal`, then `cards`, then `liveness` (below) | `unknown`, sourced by the first missing input, and its reason names the column the board *did* establish where it did |
 | `head_profiles` | `heads` (the installed head registry), which also needs `sprints`, and `liveness` when it answered | every role `null`, sourced by the first of `sprints`, `liveness`, `heads` that was missing; a `liveness` alone missing costs only `via: launched` |
 | `observer.declared` | `sprints` | `unknown` — never `absent`, which would be a claim about a row nobody has seen |
 | `observer.launch` | `liveness`, which also needs `sprints` | `unavailable`, sourced `sprints` or `liveness` — never `not_started` |
@@ -5035,6 +5035,9 @@ and the sprint page draws it as "Waiting on", each entry linking its card and an
 | `blocked` | the production state | the current card stands in an active column with no worker the dispatcher can name |
 | `waiting` | the production state | the dispatcher holds no record for a card in an active column |
 | `working` | the production state | the dispatcher's record for the current card, and the state it is in |
+| `waiting` | the production state | the current card is merged and the dispatcher still watches its post-merge CI |
+| `waiting` | the journal | the current card stands in Post-merge CI and the release merge its last transition records has a committed `red`, `absent` or `timeout` result: it waits for a manual disposition (`task dispose-post-merge`) |
+| `waiting` | the Pipeline listing | the current card stands in Post-merge CI with no such result: it waits for its exact green merge CI |
 | `unknown` | the production state | the card is in an active column and the production state could not be read — the reason still names the column, because that much *was* established |
 | `unknown` | the Pipeline listing | neither the listing nor the production state could be read: the listing is the first input the chain was missing, so it is what the section names |
 | `unknown` | the sprint row | the sprint board could not be read, so there is no sprint here to be waiting |
