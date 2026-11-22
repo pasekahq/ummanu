@@ -24,7 +24,7 @@ from tests.sql_backend_fixtures import PostgresBoard
 from ummanu._fsutil import file_lock
 from ummanu.board import po_execution, po_origin as origin_field
 from ummanu.board.e2e_disposition import completion_identity
-from ummanu.board.e2e_record import AfterMergeMark, e2e_state
+from ummanu.board.e2e_record import AfterMergeMark, E2eRun, e2e_state
 from ummanu.board.models import Actor, EntityKind, Event, EventKind
 from ummanu.board.owner_events import READ_ONLY_KINDS, OwnerEventStore
 from ummanu.dispatch import e2e_after_merge
@@ -376,6 +376,33 @@ class PlacementTests(E2eStageFixture, unittest.TestCase):
         self.assertEqual(self.wait_cards(), [])
         self.assertNotIn("e2e", self.card())
         self.assertEqual(self.card()["state"], "assessment", "it parks as a project with no e2e does")
+
+
+class WaitCardDodItemTests(unittest.TestCase):
+    """The wait card keeps the carrier's DoD item only inside the carrier's own sprint."""
+
+    def created_dod_item(self, *, carrier_sprint: str, charged_to: str) -> str | None:
+        runtime = mock.Mock()
+        runtime.reader.show.return_value = {"ref": "ummanu-1", "sprint": carrier_sprint, "dod_item": "d2"}
+        runtime.writer.create.return_value = {"task": {"ref": "ummanu-2"}}
+        run = E2eRun(
+            dispatch_id="ummanu-1-am-1", sha=_sha("a"), repo=REPO, branch="", workflow="e2e.yml",
+            intent_at=_now(), covered=[{"ref": "ummanu-1", "merge_sha": _sha("a")}], charged_to=charged_to,
+        )
+        with (
+            mock.patch.object(e2e_after_merge, "_sprint_open", return_value=True),
+            mock.patch.object(e2e_after_merge, "_persist_run"),
+        ):
+            e2e_after_merge._create_wait(runtime, "ummanu", "ummanu-1", mock.Mock(), run)
+        created = runtime.writer.create.call_args.kwargs
+        self.assertEqual(created["sprint"], charged_to)
+        return created.get("dod_item")
+
+    def test_the_carrier_s_own_sprint_keeps_its_dod_item(self) -> None:
+        self.assertEqual(self.created_dod_item(carrier_sprint=SPRINT, charged_to=SPRINT), "d2")
+
+    def test_another_sprint_gets_no_guessed_dod_item(self) -> None:
+        self.assertIsNone(self.created_dod_item(carrier_sprint="sprint:1032", charged_to=SPRINT))
 
 
 class QueueingTests(AfterMergeFixture, unittest.TestCase):
