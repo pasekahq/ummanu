@@ -11,8 +11,8 @@ Tests
 6. Do not add a test that:
    - asserts a removed name, file, field, flag or wording is absent;
    - reads checked-in docs, prompts, skills, Markdown or product source as text (inspect.getsource, read_text of .py, grep or AST scan of src); runtime product output is exempt;
-   - compares a constant with its literal, or repeats an existing test.
-   Why: passing after deleting code and tests proves removal; boundaries belong in lint.
+   - compares a constant to its literal or repeats an existing test.
+   Why: passing after deleting code and tests proves removal; lint owns boundaries.
 7. Delete the tests of code you delete. Why: they either fail or keep testing nothing.
 
 Code
