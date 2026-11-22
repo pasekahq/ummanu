@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Any
 
 from ummanu.board.card_transitions import CARD_TRANSITIONS
+from ummanu.board.completion_evidence import review_required
 from ummanu.board.legacy_codec import TASK_STATE_BY_COLUMN
 from ummanu.board.models import CardState
 from ummanu.board.owner_handover import waiting_owner
@@ -142,6 +143,7 @@ def _tile(row: dict[str, Any], state: str, *, now: float) -> dict[str, Any]:
         "moved": _moved(row.get("moved"), now=now),
         "blocked_reason": _blocked_reason(row) if state == "blocked" else None,
         "waiting_owner": waiting_owner({"extensions": row.get("extensions")}),
+        "review_required": review_required(row),
     }
 
 

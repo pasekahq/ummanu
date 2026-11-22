@@ -4393,7 +4393,8 @@ cursor, and its result: the worker's
 observer's `decision:*`, and the latest of them, marked `terminal` when the card is Done. `card.value`
 also carries the card's `origin` ([PO delegation](#po-delegation), with its `returns`), `wait`
 ([Wait cards](#wait-cards)) and `e2e` ([The e2e stage](#the-e2e-stage)) blocks as `task show` gives them,
-each null for a card without one.
+each null for a card without one, and `review_required`, the card's stored review choice; the card
+page shows a `no review` chip when it is `false`.
 
 `task_snapshot.pipeline`, native `task show.pipeline` and each board tile's `pipeline` share
 `webproto.pipeline.pipeline_summary`. The read-only shape is
@@ -4440,7 +4441,7 @@ cards in its state; `done` holds the Done cards moved in the last 48 hours and e
 archived ones included, of an open sprint. `project` keeps that project's cards of this window,
 `sprint` that sprint's, and `sprint="none"` the cards of no sprint; both together intersect, and a
 value no card matches is empty columns. The document echoes them as `filter: {project, sprint}`.
-A tile is `{ref, title, type, project, sprint, head, moved, blocked_reason, waiting_owner, ready_skip, pipeline}`: `sprint`
+A tile is `{ref, title, type, project, sprint, head, moved, blocked_reason, waiting_owner, review_required, ready_skip, pipeline}`: `sprint`
 is `{state: linked|none|unreadable, ref}`; `head` is the chosen head else the resolved one, the worker's in `in_progress` and the reviewer's in `validate` or `review`; CI names no running reviewer,
 null elsewhere; `moved` is `{at, age_seconds}`, null for a missing, future or out-of-range
 `date_moved`; `blocked_reason` comes from the comment the move into Blocked wrote: the earliest
@@ -4452,6 +4453,7 @@ or before it. The shown line is the first line that says something: the marker, 
 `classification: <value>` line and a heading that is only a label (`## Blocker`) are skipped, and
 heading marks, a leading `classification: <value>` clause and a leading `Blocker:` label are
 stripped. It is null when no such line is left; `waiting_owner` is the PO's handover mark;
+`review_required` is the card's stored review choice (`false` for `skipped`, shown as a `no review` chip);
 `ready_skip` is `{reason, since}` from the dispatcher's `production-state.json` for a Ready card its
 claim pass skipped (as in a sprint's [`ready_skips`](#what-a-sprint-is-doing)), and null for any other
 card. One production-state file read supplies both ready skips and dispatcher records for all
@@ -5253,7 +5255,7 @@ unrouted method on a routed path is 405; neither reaches a handler.
 | method | route | operation | answers |
 | --- | --- | --- | --- |
 | GET | `/` | `reads.system_snapshot` (+ `po.po_running_count`) | the compact dashboard: pipeline controls and running PO turns, the current health problem, open sprints with their card, heads and budget, and links to the board and all sprints |
-| GET | `/board` | `reads.board_view` (+ `reads.board_filters`) | every work card in one column per state with its count, narrowed by `?project=<id>` and `?sprint=<ref>` or `?sprint=none` (вне спринта), each a tile: ref, title on one line, type, project, sprint or "вне спринта", current head, age in the column, a Blocked card's reason (two lines at most, the whole in its tooltip), a skipped Ready card's "not taken since <since>: <reason>" (two lines at most) and a mark for a card waiting for the owner; the page takes the full width and an empty column collapses to its header and count; on a desktop screen the board fits the viewport, each column scrolls its tiles and the board keeps its scroll across a reload in the same tab; a narrow screen stacks the columns; above them the active filter and a GET form (the registered projects, вне спринта, the open sprints) with a reset to the whole board; a filter no card matches is an empty board; an unreadable board is a "board not readable" notice with its reason |
+| GET | `/board` | `reads.board_view` (+ `reads.board_filters`) | every work card in one column per state with its count, narrowed by `?project=<id>` and `?sprint=<ref>` or `?sprint=none` (вне спринта), each a tile: ref, title on one line, type, project, sprint or "вне спринта", current head, age in the column, a Blocked card's reason (two lines at most, the whole in its tooltip), a skipped Ready card's "not taken since <since>: <reason>" (two lines at most), a mark for a card waiting for the owner and a "no review" chip for a card whose review is skipped; the page takes the full width and an empty column collapses to its header and count; on a desktop screen the board fits the viewport, each column scrolls its tiles and the board keeps its scroll across a reload in the same tab; a narrow screen stacks the columns; above them the active filter and a GET form (the registered projects, вне спринта, the open sprints) with a reset to the whole board; a filter no card matches is an empty board; an unreadable board is a "board not readable" notice with its reason |
 | GET | `/tasks/{ref}` | `reads.task_snapshot` (+ `ops.run_list`, `po.po_session_titles`) | one card: its full description, state, attempt, heads with model and effort, product runs, worker and reviewer output, result, event tail; and, when the card carries them, the **Delegation** block ("Delegated by" the PO session's title linked to `/po/sessions/<id>`, its short id when untitled or gone, the successor the result goes to now, and each return: state, delivery, when, which session received it), the **Wait** block (the target as a run link, a card link with the awaited states, or a time; waiting since, deadline, state, the frozen result with its evidence link, and each return address with its delivery) and the **E2E** block (each run's SHA, link, state or result and wait card; the budget or cap, the budget mark with its decision card, and the after-merge state and runs). A PO store that does not answer marks the titles unavailable and leaves the rest of the page |
 | GET | `/tasks/{ref}/heads/{run_id}` | `reads.head_view` | one of the card's local-pty heads, read-only: its terminal's tail as redacted plain text and its journal's tail; a run id the card did not record is 404 |
 | GET | `/sprints` | `sprint_reads.sprint_list` | active sprints or the searchable `?view=archive`, optionally filtered by `q` and `project` |

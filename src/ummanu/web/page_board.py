@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import quote
 
 from ummanu.web.page_assets import _BOARD_SCRIPT
-from ummanu.web.page_parts import STATE_TONES, _age, _link, _or_dash, _pipeline
+from ummanu.web.page_parts import NO_REVIEW, STATE_TONES, _age, _link, _or_dash, _pipeline
 from ummanu.web.page_shell import _page
 from ummanu.web.page_values import _mapping
 from ummanu.webproto import board_view
@@ -89,6 +89,7 @@ def _tile(tile: dict[str, Any], *, blocked: bool) -> str:
             ("chip", escape(str(tile.get("type") or NO_TYPE))),
             ("chip", escape(str(tile.get("project") or NO_PROJECT))),
             ("sprint", _sprint(_mapping(tile.get("sprint")))),
+            *((("chip chip-warn", NO_REVIEW),) if tile.get("review_required") is False else ()),
         )
     )
     said = escape(str(tile.get("blocked_reason") or NO_REASON))

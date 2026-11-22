@@ -91,6 +91,14 @@ class BoardStoreReadTests(unittest.TestCase):
         self.card("ummanu-2", "ready", moved=NOW - HOUR, task_type=None)
         self.assertEqual(self.refs(), {"ummanu-1"})
 
+    def test_a_tile_reads_whether_its_card_is_reviewed(self) -> None:
+        self.card("ummanu-1", "ready", moved=NOW - HOUR)
+        key = self.card("ummanu-2", "ready", moved=NOW - HOUR)
+        self.board.save_metadata(key, {"review": "skipped"})
+        tiles = [tile for column in self.columns() for tile in column["cards"]]
+        reviewed = {tile["ref"]: tile["review_required"] for tile in tiles}
+        self.assertEqual(reviewed, {"ummanu-1": True, "ummanu-2": False})
+
     def test_project_and_sprint_narrow_the_window_and_together_intersect(self) -> None:
         self.board.ensure_sprint("sprint:1", status="open")
         self.board.ensure_sprint("sprint:2", status="closed")

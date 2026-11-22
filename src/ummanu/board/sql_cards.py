@@ -904,7 +904,7 @@ class SqlCardClient:
         rows = self._query(
             "SELECT t.task_ref, t.title, t.state, t.task_type, t.project_id, t.sprint_ref, "
             "extract(epoch FROM t.date_moved), t.head_override, t.resolved_worker_head, "
-            "t.review_head_override, t.resolved_review_head, t.extensions, blocking.body, report.body "
+            "t.review_head_override, t.resolved_review_head, t.review, t.extensions, blocking.body, report.body "
             "FROM tasks t LEFT JOIN sprints s ON s.ref = t.sprint_ref "
             "LEFT JOIN LATERAL (SELECT c.body, c.created_at FROM task_comments c WHERE t.state = 'blocked' "
             "AND c.task_ref = t.task_ref AND c.marker = ANY(%s::text[]) "
@@ -928,7 +928,7 @@ class SqlCardClient:
         )
         names = (
             "ref", "title", "state", "type", "project", "sprint", "moved", "head_override",
-            "worker_head", "review_head_override", "review_head", "extensions", "blocking_comment",
+            "worker_head", "review_head_override", "review_head", "review", "extensions", "blocking_comment",
             "worker_report",
         )
         return [dict(zip(names, values, strict=True)) for values in rows]
