@@ -513,7 +513,7 @@ class StatusCliTests(unittest.TestCase):
         self.assertIn("status", payload)
 
     def test_doctor_json_carries_open_sprints_whole_and_finished_ones_as_counts(self):
-        """issue:f53123003f128f755d0d: doctor's output must not grow with the sprint history."""
+        """Doctor's output must not grow with the sprint history."""
         root = Path(__file__).resolve().parents[1]
         long_text = "x" * 4096
 
