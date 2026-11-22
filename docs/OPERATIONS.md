@@ -1292,6 +1292,13 @@ passed checks. A result file describes its run, not current freshness.
 The gate does not check forge configuration. Without an explicit validation command it runs `git diff
 --check HEAD`; a passed validation does not mean branch protection exists.
 
+Each setup command, the smoke command and `validation.command` run with one fixed limit of 300 s on
+the pipeline host; the adapter cannot change it. A command killed at the limit fails its check with
+"timed out after 300 s (onboarding gate limit)". Keep `validation.command` a short environment proof,
+not the whole suite: a suite that outgrows the limit passes the gate once and then blocks every
+re-onboarding. With `ci: github` the gate is the only reader of `validation.command`, so narrowing it
+changes no card protection.
+
 The mechanical gate reads `validation.required_checks` from the adapter:
 
 - set: only those names (Actions check-run name or legacy status context) colour the card; missing

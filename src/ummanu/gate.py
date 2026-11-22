@@ -272,10 +272,15 @@ def _publish_failure(
     path: Path, result: dict[str, Any], stage: str, outcome: subprocess.CompletedProcess[str]
 ) -> tuple[int, dict[str, Any]]:
     result["checks"][stage] = {"status": "failed"}
+    message = f"{stage} command failed"
+    if isinstance(outcome, _TimedOut):
+        message = f"{stage} command timed out after {outcome.limit:g} s (onboarding gate limit)"
+        if stage == "validation":
+            message += "; the limit is fixed, make validation.command a shorter environment proof"
     result["findings"] = [
         {
             "code": f"{stage}.failed",
-            "message": f"{stage} command failed",
+            "message": message,
             "log_tail": _redact((outcome.stdout + outcome.stderr)[-_TAIL:]),
         }
     ]
@@ -302,10 +307,18 @@ def _publish_result(path: Path, result: dict[str, Any]) -> tuple[int, dict[str, 
     return 1, result
 
 
+class _TimedOut(subprocess.CompletedProcess[str]):
+    """A command the gate killed at its limit; `limit` is that limit in seconds."""
+
+    def __init__(self, exc: subprocess.TimeoutExpired) -> None:
+        stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout or ""
+        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr or ""
+        self.limit = exc.timeout
+        super().__init__(exc.cmd, 124, stdout, stderr + f"\ncommand timed out after {exc.timeout:g} s")
+
+
 def _timed_out(exc: subprocess.TimeoutExpired) -> subprocess.CompletedProcess[str]:
-    stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout or ""
-    stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr or ""
-    return subprocess.CompletedProcess(exc.cmd, 124, stdout, stderr + "\ncommand timed out")
+    return _TimedOut(exc)
 
 
 def _gate_run_id(project_id: str, head: str, provision_run: str, digest: str) -> str:
