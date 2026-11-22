@@ -79,7 +79,7 @@ from ummanu.sprints import (
     require_active_sprint_projects,
     sprint_guard_index_initialized,
 )
-from ummanu.tasks import recorded_card_transition, task_audit_for
+from ummanu.tasks import RELEASE_MERGE_KEY, post_merge_ci_fact, recorded_card_transition, task_audit_for
 from ummanu.webproto import sources
 from ummanu.webproto._values import _reason
 from ummanu.webproto.boundary import ProtocolBoundary
@@ -647,6 +647,8 @@ class SprintSections(SectionSet):
         * the dispatcher: `working`, degraded `blocked`, or no record. A column alone is not evidence a
           head runs (`docs/OPERATIONS.md`);
         * a merged card whose post-merge CI the dispatcher still watches: `waiting` on that CI;
+        * the journal: `waiting` on a manual disposition once the card's current release merge has a
+          committed non-green post-merge CI result;
         * otherwise the board's `waiting` for Ready, Issues or Done.
 
         `card` is the sprint's current card, or null.
@@ -725,6 +727,26 @@ class SprintSections(SectionSet):
                 "card": current,
             }
 
+        def merge_ci_answered(
+            sprint: _Sprint, linked: dict[str, list[dict[str, Any]]], events: list[dict[str, Any]]
+        ) -> dict[str, Any] | None:
+            current, card = _card_of(sprint, linked)
+            if current is None or card is None or str(card.get("state") or "") != "post_merge_ci":
+                return None
+            fact = _merge_ci_result(events, current)
+            if fact is None or fact["result"] == "green":
+                return None
+            sha = str(fact.get("merge_sha") or "")[:12] or "its merge"
+            base = str(fact.get("base") or "") or "the base"
+            return {
+                "state": WAITING_WAITING,
+                "reason": (
+                    f"{current} stands in Post-merge CI: the merge CI of {sha} on {base} answered "
+                    f"{fact['result']}; waiting for a manual disposition (task dispose-post-merge)"
+                ),
+                "card": current,
+            }
+
         def board_settled(sprint: _Sprint, linked: dict[str, list[dict[str, Any]]]) -> dict[str, Any] | None:
             current, card = _card_of(sprint, linked)
             settled = _board_wait(current, card)
@@ -748,6 +770,7 @@ class SprintSections(SectionSet):
             Rule(SOURCE_CARDS, (SOURCE_SPRINTS, SOURCE_CARDS), with_the_po),
             Rule(SOURCE_LIVENESS, (SOURCE_SPRINTS, SOURCE_LIVENESS), dispatcher_holds_it),
             Rule(SOURCE_LIVENESS, (SOURCE_SPRINTS, SOURCE_LIVENESS), post_merge_ci),
+            Rule(SOURCE_JOURNAL, (SOURCE_SPRINTS, SOURCE_CARDS, SOURCE_JOURNAL), merge_ci_answered),
             Rule(SOURCE_CARDS, (SOURCE_SPRINTS, SOURCE_CARDS), board_settled),
             Rule(SOURCE_LIVENESS, (SOURCE_SPRINTS, SOURCE_LIVENESS), nothing_claimed),
             blank={"state": WAITING_UNKNOWN, "reason": None, "card": None},
@@ -2017,6 +2040,24 @@ def _last_transition(events: list[dict[str, Any]], card: str) -> dict[str, Any] 
             continue
         if recorded_card_transition(event) is not None:
             return event
+    return None
+
+
+def _merge_ci_result(events: list[dict[str, Any]], card: str) -> dict[str, Any] | None:
+    """The committed post-merge CI result of the release merge the card's last transition records.
+
+    `None` while that merge has no result yet, or when the last transition records no release merge.
+    """
+    moved = _last_transition(events, card)
+    data = moved.get("data") if moved is not None else None
+    merge = data.get(RELEASE_MERGE_KEY) if isinstance(data, dict) else None
+    if not isinstance(merge, dict):
+        return None
+    wanted = (merge.get("base"), merge.get("merge_sha"))
+    for event in reversed(events):
+        fact = post_merge_ci_fact(event) if str(event.get("ref") or "") == card else None
+        if fact is not None and (fact.get("base"), fact.get("merge_sha")) == wanted:
+            return fact
     return None
 
 

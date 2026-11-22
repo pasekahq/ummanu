@@ -1458,6 +1458,57 @@ class WaitingSourceIsolationTests(SprintWorkFixture):
                 self.assertIn("waiting for exact green merge CI completion", work["waiting"]["reason"])
                 self.assertEqual(work["waiting"]["card"], card)
 
+    def test_post_merge_ci_with_a_published_non_green_result_waits_for_a_manual_disposition(self) -> None:
+        reference, card = self._sprint_on_a_card()
+        self._move(card, "Post-merge CI")
+        self._production({}, {})
+        merge = {"base": "main", "merge_sha": "ab12cd34ef56" + "0" * 28, "path": "github-pr"}
+        audit = task_audit_for(self.board)
+        released = {
+            "event_id": "board-event-release",
+            "schema_version": 1,
+            "record_type": PROTOCOL_EVENT_RECORD_TYPE,
+            "kind": "card.moved",
+            "ref": card,
+            "occurred_at": "2026-09-05T21:00:00Z",
+            "actor": {"role": "dispatcher", "id": "dispatcher"},
+            "transition": {"source": "assessment", "target": "post_merge_ci"},
+            "data": {"release_merge": merge},
+        }
+        audit.append(released["event_id"], {"request_id": released["event_id"], **released})
+
+        def publish(result: str, merge_sha: str) -> None:
+            fact = {"result": result, "card": card, "base": "main", "merge_sha": merge_sha}
+            event_id = f"evt_post_merge_{result}_{merge_sha[:4]}"
+            commented = {
+                "event_id": event_id,
+                "schema_version": 1,
+                "kind": "commented",
+                "outcome": "success",
+                "ref": card,
+                "occurred_at": "2026-09-05T22:00:00Z",
+                "actor": {"role": "dispatcher", "id": "dispatcher"},
+                "payload": {"post_merge_ci": fact},
+            }
+            audit.append(event_id, {"request_id": event_id, **commented})
+
+        # A result of an earlier merge says nothing about this one, which is still pending.
+        publish("red", "ffff" + "0" * 36)
+        pending = self._entry(self.reads().sprint_list(), reference)["waiting"]
+        self.assertIn("waiting for exact green merge CI completion", pending["reason"])
+        for result in ("red", "absent", "timeout"):
+            with self.subTest(result=result):
+                publish(result, merge["merge_sha"])
+                for operation, work in self._work(reference):
+                    with self.subTest(operation=operation):
+                        waiting = work["waiting"]
+                        self.assertEqual(waiting["state"], sprint_reads_module.WAITING_WAITING)
+                        self.assertNotIn("waiting for exact green", waiting["reason"])
+                        self.assertIn(f"answered {result}", waiting["reason"])
+                        self.assertIn("ab12cd34ef56", waiting["reason"])
+                        self.assertIn("manual disposition", waiting["reason"])
+                        self.assertEqual(waiting["card"], card)
+
     def test_an_active_column_with_no_record_still_prefers_what_the_board_settled(self) -> None:
         """The dispatcher answered, and holds no record: the column is the better answer where it
         has one, and the bare "no record" is what is left where it does not."""
@@ -2828,7 +2879,9 @@ class SourceIsolationMatrixTests(SprintWorkFixture):
             self._sections(
                 degraded_cards=("liveness", "unavailable", None),
                 checks=("liveness", "unavailable", sprint_reads_module.CHECKS_UNKNOWN),
-                waiting=("liveness", "unavailable", sprint_reads_module.WAITING_UNKNOWN),
+                # `waiting` consults the journal for a committed post-merge CI result, and the journal
+                # precedes the production state among the sources.
+                waiting=("journal", "unavailable", sprint_reads_module.WAITING_UNKNOWN),
                 **{
                     "source:journal": ("journal", "unavailable"),
                     "source:liveness": ("liveness", "unavailable"),
