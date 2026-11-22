@@ -1644,7 +1644,7 @@ class IsolatedChildWithinTests(unittest.TestCase):
         started = time.monotonic()
         result = runtime.probe(self.deadline(0.8))
         self.assertLess(time.monotonic() - started, 0.8 + 0.1)
-        self.assertEqual(result.classification, "interpreter_unavailable")
+        self.assertEqual(result.classification, "preflight_timeout")
 
 
 if __name__ == "__main__":

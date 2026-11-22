@@ -76,7 +76,9 @@ class ProductionRuntime:
         """Observe the configured interpreter through the executable pre-import boundary.
 
         With a caller's `within` (seconds left of its deadline) the preflight child runs in its own
-        process group inside that deadline (`_proc.run_isolated`); one cut short is unavailable."""
+        process group inside that deadline (`_proc.run_isolated`). A missing or unstartable
+        interpreter is `interpreter_unavailable`; a child cut short is `preflight_timeout` and one
+        that prints no provenance object is `preflight_invalid_payload`. Each is a refusal alike."""
         expected_python = Path(self.interpreter).expanduser().absolute()
         root = Path(self.product_root).expanduser().resolve(strict=False)
         if not expected_python.is_file() or not os.access(expected_python, os.X_OK):
@@ -103,6 +105,8 @@ class ProductionRuntime:
                 completed = subprocess.run(argv, text=True, capture_output=True, timeout=30, check=False, env=env)
             else:
                 completed = _proc.run_isolated(argv, env=env, timeout=30, within=within)
+        except subprocess.TimeoutExpired:
+            return RuntimeProvenance("preflight_timeout", str(expected_python), str(root), "", ())
         except (OSError, subprocess.SubprocessError):
             return RuntimeProvenance("interpreter_unavailable", str(expected_python), str(root), "", ())
         try:
@@ -110,5 +114,5 @@ class ProductionRuntime:
         except (TypeError, ValueError):
             payload = {}
         if not isinstance(payload, dict) or not payload:
-            return RuntimeProvenance("interpreter_unavailable", str(expected_python), str(root), "", ())
+            return RuntimeProvenance("preflight_invalid_payload", str(expected_python), str(root), "", ())
         return RuntimeProvenance.from_dict(payload)

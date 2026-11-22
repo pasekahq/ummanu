@@ -175,6 +175,32 @@ class ProductionRuntimeTests(unittest.TestCase):
             ).probe()
         self.assertEqual(observed.classification, "interpreter_unavailable")
 
+    def test_a_preflight_cut_short_or_without_a_payload_is_not_a_missing_interpreter(self) -> None:
+        # A deadline cut or unreadable output named the same, present
+        # interpreter `interpreter_unavailable`, as though it were missing.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            interpreter = root / "python3"
+            for body, expected in (
+                ("echo not-json", "preflight_invalid_payload"),
+                ("echo '{}'", "preflight_invalid_payload"),
+                ("exit 0", "preflight_invalid_payload"),
+            ):
+                with self.subTest(body=body):
+                    interpreter.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+                    interpreter.chmod(0o755)
+                    observed = ProductionRuntime(str(interpreter), str(root)).probe()
+                    self.assertEqual(observed.classification, expected)
+                    self.assertFalse(observed.valid)
+                    self.assertEqual(observed.interpreter, str(interpreter))
+            with mock.patch(
+                "ummanu.dispatch.runtime_provenance.subprocess.run",
+                side_effect=subprocess.TimeoutExpired([str(interpreter)], 30),
+            ):
+                observed = ProductionRuntime(str(interpreter), str(root)).probe()
+            self.assertEqual(observed.classification, "preflight_timeout")
+            self.assertFalse(observed.valid)
+
     def test_missing_import_has_its_own_classification(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
