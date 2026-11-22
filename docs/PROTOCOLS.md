@@ -4391,7 +4391,8 @@ cursor, and its result: the worker's
 observer's `decision:*`, and the latest of them, marked `terminal` when the card is Done. `card.value`
 also carries the card's `origin` ([PO delegation](#po-delegation), with its `returns`), `wait`
 ([Wait cards](#wait-cards)) and `e2e` ([The e2e stage](#the-e2e-stage)) blocks as `task show` gives them,
-each null for a card without one.
+each null for a card without one, and `review_required`, the card's stored review choice; the card
+page shows a `no review` chip when it is `false`.
 
 `task_snapshot.pipeline`, native `task show.pipeline` and each board tile's `pipeline` share
 `webproto.pipeline.pipeline_summary`. The read-only shape is
@@ -4438,7 +4439,7 @@ cards in its state; `done` holds the Done cards moved in the last 48 hours and e
 archived ones included, of an open sprint. `project` keeps that project's cards of this window,
 `sprint` that sprint's, and `sprint="none"` the cards of no sprint; both together intersect, and a
 value no card matches is empty columns. The document echoes them as `filter: {project, sprint}`.
-A tile is `{ref, title, type, project, sprint, head, moved, blocked_reason, waiting_owner, ready_skip, pipeline}`: `sprint`
+A tile is `{ref, title, type, project, sprint, head, moved, blocked_reason, waiting_owner, review_required, ready_skip, pipeline}`: `sprint`
 is `{state: linked|none|unreadable, ref}`; `head` is the chosen head else the resolved one, the worker's in `in_progress` and the reviewer's in `validate` or `review`; CI names no running reviewer,
 null elsewhere; `moved` is `{at, age_seconds}`, null for a missing, future or out-of-range
 `date_moved`; `blocked_reason` comes from the comment the move into Blocked wrote: the earliest
@@ -4450,6 +4451,7 @@ or before it. The shown line is the first line that says something: the marker, 
 `classification: <value>` line and a heading that is only a label (`## Blocker`) are skipped, and
 heading marks, a leading `classification: <value>` clause and a leading `Blocker:` label are
 stripped. It is null when no such line is left; `waiting_owner` is the PO's handover mark;
+`review_required` is the card's stored review choice (`false` for `skipped`, shown as a `no review` chip);
 `ready_skip` is `{reason, since}` from the dispatcher's `production-state.json` for a Ready card its
 claim pass skipped (as in a sprint's [`ready_skips`](#what-a-sprint-is-doing)), and null for any other
 card. One production-state file read supplies both ready skips and dispatcher records for all

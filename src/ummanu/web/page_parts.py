@@ -27,6 +27,10 @@ def _panel(title: str, body: str, *, count: Any = None, more: str = "", open_: b
     )
 
 
+#: The chip of a card whose review is skipped: no reviewer reads its result.
+NO_REVIEW = "no review"
+
+
 def _chip(text: str, tone: str = "") -> str:
     tone_class = f" chip-{tone}" if tone else ""
     return f'<span class="chip{tone_class}">{escape(text)}</span>'

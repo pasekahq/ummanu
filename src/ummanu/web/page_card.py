@@ -11,6 +11,7 @@ from urllib.parse import quote
 from ummanu.web import markdown
 from ummanu.web.page_assets import _ACTIONS_SCRIPT, _TASK_SCRIPT
 from ummanu.web.page_parts import (
+    NO_REVIEW,
     STATE_TONES,
     _chip,
     _comment_form,
@@ -57,6 +58,8 @@ def task(snapshot: dict[str, Any], *, runs: dict[str, Any], sessions: dict[str, 
     kind = " · ".join(str(part) for part in (value.get("type"), routing.get("complexity")) if part)
     if kind:
         chips.append(_chip(kind))
+    if value.get("review_required") is False:
+        chips.append(_chip(NO_REVIEW, "warn"))
     handed = value.get("waiting_owner") if isinstance(value.get("waiting_owner"), dict) else None
     if handed:
         chips.append(

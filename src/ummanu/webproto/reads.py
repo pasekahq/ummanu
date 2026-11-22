@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ummanu.board.backend import CARD, board_client
+from ummanu.board.completion_evidence import review_required
 from ummanu.board.owner_handover import waiting_owner
 from ummanu.board.production_rights import touches_production
 from ummanu.checkpoint import rpo_problem
@@ -743,6 +744,7 @@ def _card_value(card: dict[str, Any] | None) -> dict[str, Any] | None:
     value["closed"] = bool(card.get("closed"))
     value["workspace"] = card.get("workspace")
     value["routing"] = card.get("routing")
+    value["review_required"] = review_required(card)
     # A decision/operation card the PO handed to the owner: `{since, reason, by}`, else null.
     value["waiting_owner"] = waiting_owner(card)
     # The production an operation card touches (`none` included), else null.

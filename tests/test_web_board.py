@@ -30,7 +30,7 @@ from ummanu.dispatch.gate_receipt import mint_gate_receipt
 from ummanu.dispatch.state import REVIEW_REJECTION_REASON
 from ummanu.web.app import WebApp
 from ummanu.web.page_card import task as task_page
-from ummanu.webproto.reads import ReadLayer
+from ummanu.webproto.reads import ReadLayer, _card_value
 
 NOW = 1_800_000_000.0
 HOUR = 3600.0
@@ -50,6 +50,7 @@ def row(ref: str, state: str, **values: Any) -> dict[str, Any]:
         "worker_head": None,
         "review_head_override": None,
         "review_head": None,
+        "review": "required",
         "extensions": {},
         "blocking_comment": None,
         "worker_report": None,
@@ -202,6 +203,20 @@ class TileTests(unittest.TestCase):
         meta = re.search(r'<p class="tile-meta">.*?</p>', tile_of(html, "u-1")).group(0)
         items = re.findall(r'<span class="meta-item [a-z]+">(.*?)</span>', meta)
         self.assertEqual([text(item) for item in items], ["code", "codegen-orchestrator", "вне спринта"])
+
+    def test_a_card_whose_review_is_skipped_says_no_review_on_its_tile_and_its_page(self) -> None:
+        client = BoardClient(
+            [row("u-1", "ready", review="skipped"), row("u-2", "ready"), row("u-3", "ready", review=None)]
+        )
+        _status, html = page(client)
+        shown = {ref: "no review" in text(tile_of(html, ref)) for ref in ("u-1", "u-2", "u-3")}
+        self.assertEqual(shown, {"u-1": True, "u-2": False, "u-3": False})
+        for review, expected in (("skipped", True), ("required", False), (None, False)):
+            with self.subTest(review=review):
+                card = {"ref": "u-1", "title": "title of u-1", "state": "ready", "review": review}
+                value = _card_value(card)
+                hero = task_page({"ref": "u-1", "card": {"source": None, "value": value}}, runs={})
+                self.assertEqual("no review" in text(hero.split('<div class="grid">')[0]), expected)
 
     def test_the_head_is_the_worker_in_progress_the_reviewer_in_validate_and_none_elsewhere(self) -> None:
         heads = {
