@@ -965,6 +965,7 @@ def collect_doctor_inspection(report, args: argparse.Namespace) -> DoctorInspect
     from ummanu.infra.fallback import fallback_errors
     from ummanu.infra.head_credential_findings import role_head_credential_findings
     from ummanu.infra.identifier_findings import stored_identifier_findings
+    from ummanu.infra.local_gate_findings import local_gate_findings
     from ummanu.infra.recovery_inventory import collect_recovery_inventory
 
     findings: list[dict[str, object]] = []
@@ -983,6 +984,7 @@ def collect_doctor_inspection(report, args: argparse.Namespace) -> DoctorInspect
         findings.extend(doctor_git_hooks_findings(report))
         findings.extend(role_head_credential_findings())
     findings.extend(stored_identifier_findings(report.instance_path.parent))
+    findings.extend(local_gate_findings(report.instance_path.parent))
     collected: CollectResult | None = None
     expected = None
     diffs = None
