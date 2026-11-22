@@ -604,8 +604,8 @@ body.fit-viewport .top .row, body.fit-viewport main { max-width: none; }
 
 /* the shared bottom bar: what each provider has left, on every page.
    Its height is reserved on the body rather than overlaid, so nothing a page draws -- the /po
-   composer least of all -- ends up underneath it. The row never wraps: it scrolls sideways
-   instead, which is what keeps the reserved height true at phone width as well as at desktop. */
+   composer least of all -- ends up underneath it. A wide row never wraps, which is what keeps the
+   reserved height true; a narrow one wraps in the page flow (below). */
 :root { --bar-height: 2.4rem; scroll-padding-bottom: calc(var(--bar-height) + .5rem); }
 body { padding-bottom: var(--bar-height); }
 .statusbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; height: var(--bar-height); background: var(--surface); border-top: 1px solid var(--line); }
@@ -655,6 +655,16 @@ body.fit-viewport .statusbar .credits-pop { left: 12px; }
 .statusbar .bar-refresh { display: inline-flex; align-items: center; gap: .3rem; margin: 0 0 0 auto; font-size: inherit; color: var(--muted); }
 .statusbar .bar-refresh input { margin: 0; }
 @media (max-width: 600px) { .statusbar .row { padding: 0 12px; gap: .8rem; } }
+/* Below the width one line of the bar needs, the row wraps instead of hiding its tail off screen.
+   A wrapped bar has no fixed height to reserve, so it joins the page flow, stuck to the bottom, and
+   takes the rows it needs; the credits pop then hangs off the bar, which no longer scrolls. */
+@media (max-width: 1100px) {
+  body { padding-bottom: 0; }
+  .statusbar { position: sticky; height: auto; min-height: var(--bar-height); }
+  .statusbar .row { flex-wrap: wrap; row-gap: .35rem; overflow-x: visible; padding-block: .35rem; }
+  .statusbar .provider { flex-wrap: wrap; row-gap: .35rem; }
+  .statusbar .credits-pop { position: absolute; bottom: calc(100% + .5rem); left: 12px; }
+}
 @media (prefers-reduced-motion: no-preference) { .light::before { transition: background .2s; } }
 .po-attachments { list-style:none; padding:0; margin:.3rem 0 0; display:flex; flex-wrap:wrap; gap:.5rem; }
 .po-attachments li { display:flex; flex-direction:column; align-items:flex-start; gap:.2rem; }

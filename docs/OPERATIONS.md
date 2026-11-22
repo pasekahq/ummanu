@@ -2649,7 +2649,9 @@ as its title). An unavailable provider, a stale reading with no window and a mis
 word and the reason and no percentage at all: on a bar a number is read as what is left *now*, so no
 reading is drawn as words rather than as a figure. An available reading taken a while ago says how old
 it is. The bar's height is reserved under the page rather than overlaid, so it
-covers nothing, the `/po` composer included.
+covers nothing, the `/po` composer included. Up to 1100 px wide the bar's row wraps instead of cutting
+off its tail, and the bar sits at the end of the page, stuck to the bottom of the viewport, as tall as
+its rows need.
 
 Its data is the cached provider layer (`ummanu.web.provider_usage`): each provider keeps in process its
 last successful reading and its own next-attempt moment, five minutes after any read; a `429` moves that
