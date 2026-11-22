@@ -2768,6 +2768,25 @@ class ProviderFallbackTests(ServiceFixture):
         self.assertEqual([call["cli"] for call in self.calls()], ["claude"])
         self.assertEqual(self.store().session(session_id).cli, "claude")
 
+    def test_codex_without_a_managed_login_is_not_tried_and_the_session_stays(self) -> None:
+        # issue:accf8451ab7e8b41184f: the switch to codex was committed before its launch found no
+        # login, so the turn failed with the session left on codex and no fallback notice.
+        service = self.service(models=MODELS)
+        session_id = self.session(service, "claude", "opus")
+        Path(str(self.log) + ".quota-claude").touch()
+        without_login = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in ("UMMANU_CODEX_HOME", "TA_CODEX_HOME")
+        }
+
+        with mock.patch.dict(os.environ, without_login, clear=True):
+            service.submit(session_id=session_id, text="Hello", request_id="m-1")
+            self.assertEqual(self.settled(session_id, 1).state, po_store.FAILED)
+
+        self.assertEqual([call["cli"] for call in self.calls()], ["claude"])
+        self.assertEqual(self.store().session(session_id).cli, "claude")
+
     def test_an_ordinary_failure_is_not_a_provider_failure(self) -> None:
         service = self.service(models=MODELS)
         session_id = self.session(service, "claude", "opus")
