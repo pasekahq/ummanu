@@ -904,7 +904,9 @@ cursor) into the watchdog's `panel` field; `--offline` reports it as `not-probed
 `ummanu doctor --json --instance INSTANCE` evaluates invariants over the same snapshot and exits
 non-zero for a broken or unavailable host. Use `status` for what is running and `doctor` for what
 needs repair. `--findings-only` prints only `schema_version`, `ok` and `findings` with the same exit
-code and does not collect the status snapshot.
+code and does not collect the status snapshot. Doctor's `status.installation.sprints` carries
+open sprints only, with closed and stopped ones as counts in `terminal`, so its output does not grow
+with sprint history; `status --json` keeps every sprint.
 
 Doctor measures free bytes on the filesystem containing the configured `data_dir` (or its nearest
 existing ancestor). Below 10 GiB it reports `root_disk_low` with `free_bytes` and

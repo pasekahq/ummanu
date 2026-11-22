@@ -512,6 +512,43 @@ class StatusCliTests(unittest.TestCase):
         self.assertIn("findings", payload)
         self.assertIn("status", payload)
 
+    def test_doctor_json_carries_open_sprints_whole_and_finished_ones_as_counts(self):
+        """Doctor's output must not grow with the sprint history."""
+        root = Path(__file__).resolve().parents[1]
+        long_text = "x" * 4096
+
+        def sprint(index: int, status: str) -> dict:
+            return {
+                "ref": f"sprint:{index}",
+                "status": status,
+                "goal": long_text,
+                "dod": [long_text],
+                "resume": {"selected_why": long_text},
+            }
+
+        history = [sprint(index, "closed") for index in range(299)] + [sprint(299, "stopped")]
+        current = sprint(300, "open")
+        real = collect_status
+
+        def with_history(*args, **kwargs):
+            snapshot = real(*args, **kwargs)
+            snapshot["installation"]["sprints"] = {"items": [*history, current], "error": None}
+            return snapshot
+
+        output = io.StringIO()
+        with (
+            mock.patch("ummanu.status.collect_status", side_effect=with_history),
+            contextlib.redirect_stdout(output),
+        ):
+            code = main(["doctor", "--offline", "--json", "--instance", str(root / "examples" / "instance")])
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 0, payload)
+        self.assertLess(len(output.getvalue()), 256 * 1024)
+        sprints = payload["status"]["installation"]["sprints"]
+        self.assertEqual(sprints["items"], [current])
+        self.assertEqual(sprints["terminal"], {"closed": 299, "stopped": 1})
+        self.assertIsNone(sprints["error"])
+
     def test_doctor_json_reports_the_same_missing_host_resource_as_doctor(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:

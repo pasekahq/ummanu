@@ -946,12 +946,32 @@ def _doctor_status_sections(args: argparse.Namespace, report, inspection: Doctor
         # Sprints are read from the live board store: `--offline` and `--host-fixture` read none.
         sprints=not (args.offline or args.host_fixture),
     )
+    snapshot["installation"]["sprints"] = _doctor_sprints(snapshot["installation"]["sprints"])
     codex_home_status = _codex_home_status(report)
     return {
         "board_schema": inspection.board_schema,
         "status": snapshot,
         "codex_home": codex_home_status,
         "po_codex_home": _po_codex_home_status(report, codex_home_status),
+    }
+
+
+def _doctor_sprints(section: dict[str, Any]) -> dict[str, Any]:
+    """Open sprints whole, finished ones as counts per status: doctor must not grow with history.
+
+    `status --json` keeps every sprint's full status; doctor's output has a fixed size bound.
+    """
+    from ummanu.sprints import SPRINT_TERMINAL_STATUSES
+
+    items = section.get("items") or []
+    terminal: dict[str, int] = {}
+    for item in items:
+        if item.get("status") in SPRINT_TERMINAL_STATUSES:
+            terminal[item["status"]] = terminal.get(item["status"], 0) + 1
+    return {
+        **section,
+        "items": [item for item in items if item.get("status") not in SPRINT_TERMINAL_STATUSES],
+        "terminal": dict(sorted(terminal.items())),
     }
 
 
