@@ -112,8 +112,8 @@ runtime/backend, API/CLI lifecycle, transport and recovery checks remain in thei
 definitions and exact ASTs (including decorators/defaults/annotations), operative
 instance and owner-global patches, shared error identities and recovery refusal distinctions.
 `docs/task-protocol-inventory.json` is a capture of dc84b45e source, not an independently
-executed baseline; `ast_deltas` records expected AST hashes for changed contracts without replacing
-the baseline capture. Existing task/board, dispatcher and recovery fault suites keep their
+executed baseline; a change to a captured definition refreshes its `baseline_ast_sha256` in place,
+the one record of its expected AST. Existing task/board, dispatcher and recovery fault suites keep their
 CI manifest owners. The `task-protocol-graph` workflow runs on task-owner pull requests or manual
 dispatches, using the frozen, byte-identical
 ummanu-220 research scanner against its exact dispatched SHA in CI and uploads the uncut
