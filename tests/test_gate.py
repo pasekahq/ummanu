@@ -338,6 +338,26 @@ class GateTests(unittest.TestCase):
         self.assertEqual(result["checks"]["setup"]["status"], "failed")
         self.assertNotIn("AKIAABCDEFGHIJKLMNOP", str(result))
 
+    def test_validation_timeout_names_the_gate_limit(self):
+        self.provision(validation="slow suite")
+        real_run = subprocess.run
+
+        def run(args, *pargs, **kwargs):
+            if args == "slow suite":
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"], output="", stderr="")
+            return real_run(args, *pargs, **kwargs)
+
+        with mock.patch("ummanu.gate.subprocess.run", side_effect=run):
+            code, result = run_gate(str(self.instance), "sample-project")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(result["checks"]["validation"]["status"], "failed")
+        finding = result["findings"][0]
+        self.assertEqual(finding["code"], "validation.failed")
+        self.assertIn("timed out after 300 s (onboarding gate limit)", finding["message"])
+        self.assertIn("validation.command", finding["message"])
+        self.assertIn("timed out after 300 s", finding["log_tail"])
+
     def test_scan_failure_invalidates_enabled_project_without_traceback(self):
         self.provision()
         self.assertEqual(run_gate(str(self.instance), "sample-project")[0], 0)
