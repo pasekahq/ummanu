@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from unittest import mock
 import yaml
 
 from tests.support.git import git, make_repo
+from ummanu import gate
 from ummanu.config import load_config, validate
 from ummanu.gate import _timed_out, run_gate
 from ummanu.onboarding import OnboardingStorage, ScannerError, project_add
@@ -338,16 +340,29 @@ class GateTests(unittest.TestCase):
         self.assertEqual(result["checks"]["setup"]["status"], "failed")
         self.assertNotIn("AKIAABCDEFGHIJKLMNOP", str(result))
 
+    def test_a_timed_out_command_leaves_no_process_it_started(self):
+        pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "child.pid"
+        self.provision(validation=f"sleep 60 & echo $! > {pid_file}; wait")
+
+        with mock.patch("ummanu.gate._COMMAND_TIMEOUT", 2):
+            code, result = run_gate(str(self.instance), "sample-project")
+
+        self.assertEqual(code, 1)
+        self.assertIn("timed out", result["findings"][0]["message"])
+        child = int(pid_file.read_text(encoding="utf-8"))
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child, 0)
+
     def test_validation_timeout_names_the_gate_limit(self):
         self.provision(validation="slow suite")
-        real_run = subprocess.run
+        real_run = gate.run_isolated
 
-        def run(args, *pargs, **kwargs):
-            if args == "slow suite":
-                raise subprocess.TimeoutExpired(args, kwargs["timeout"], output="", stderr="")
-            return real_run(args, *pargs, **kwargs)
+        def run(argv, *pargs, **kwargs):
+            if argv[-1] == "slow suite":
+                raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output="", stderr="")
+            return real_run(argv, *pargs, **kwargs)
 
-        with mock.patch("ummanu.gate.subprocess.run", side_effect=run):
+        with mock.patch("ummanu.gate.run_isolated", side_effect=run):
             code, result = run_gate(str(self.instance), "sample-project")
 
         self.assertEqual(code, 1)
