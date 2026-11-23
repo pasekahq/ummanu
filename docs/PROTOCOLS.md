@@ -606,6 +606,11 @@ looked up in the PO store: it is the session creating the card). The create's re
 the flags as given, so no address is recorded there. A wait card delivers only through its return
 addresses: its origin never gets a second delivery ([PO delegation](#po-delegation)).
 
+A wait created without `--description` or `--body-file` gets one written from its spec: the target,
+the sprint and DoD item it belongs to, the deadline and what happens at it, and the return
+addresses. An explicit description is kept as given, and the request identity binds the caller's
+description, not the generated one.
+
 A missing or malformed target, two targets, a missing deadline or one already past, an unknown or
 closed PO session and `observer` without a sprint are refused as `validation` (a PO store that cannot
 answer the session question as `po_store_unavailable`) with nothing written. As for decision and

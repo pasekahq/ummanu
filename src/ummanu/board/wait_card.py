@@ -352,6 +352,30 @@ def build_wait_spec(
     return WaitSpec(target, utc_text(moment), addresses, utc_text(now), window)
 
 
+def describe_wait(spec: WaitSpec, *, sprint: str = "", dod_item: str = "") -> str:
+    """The description of a wait card created without one: what it waits for, for whom and until when."""
+    lines = [f"Waits for {spec.target.describe()}."]
+    if sprint:
+        lines.append(f"Part of {sprint}" + (f", DoD item {dod_item}." if dod_item else "."))
+    lines.append(
+        f"Deadline {spec.deadline}: if the target is not reached by then, the wait ends as "
+        f"{DEADLINE_PASSED} and this card moves to Blocked."
+    )
+    lines.append(f"The result goes to {', '.join(_address_text(address) for address in spec.returns)}.")
+    lines.append("Nobody needs to act: the dispatcher closes the wait when the target is reached.")
+    return "\n".join(lines)
+
+
+def _address_text(address: str) -> str:
+    if address == OBSERVER:
+        return "the sprint's observer"
+    if address == DEPENDENTS:
+        return "the cards blocked by this one"
+    if address.startswith(PO_SESSION_PREFIX):
+        return f"PO session {address[len(PO_SESSION_PREFIX) :]}"
+    return f"card {returned_card(address)}"
+
+
 def wait_spec(task: Mapping[str, Any]) -> WaitSpec | None:
     """The card's wait spec, or None when it carries no well-formed one."""
     return WaitSpec.from_json(bag_json(task, WAIT_SPEC))
