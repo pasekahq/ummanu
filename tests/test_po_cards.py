@@ -456,6 +456,20 @@ class SettleTests(DispatcherFixture):
         self.assertEqual(self.cards.card["state"], "in_progress")
         self.assertIn("failed", self.cards.card["extensions"]["extra"]["owner_escalation"])
 
+    def test_a_provider_refused_turn_names_the_refusal_in_the_escalation(self) -> None:
+        # A spent Claude weekly limit and no fallback CLI: the bell must say so.
+        Path(str(self.log) + ".quota-claude").touch()
+        self.start()
+        runtime = self.runtime(card(description="An ordinary question."))
+        self.claim(runtime)
+        session = self.record().po_submission.session_id
+        self.assertEqual(self.settled(session, 2).state, po_store.FAILED)
+        self.assertEqual(self.tick(runtime)["action"], "po-card-turn-failed")
+        escalation = json.loads(self.cards.card["extensions"]["extra"]["owner_escalation"])
+        self.assertTrue(escalation["reason"].startswith("PO execution failed without its required response: "))
+        self.assertIn(f"PO turn {session}/2 refused by claude (quota)", escalation["reason"])
+        self.assertIn("weekly limit", escalation["reason"])
+
     def test_an_input_queued_behind_another_turn_waits(self) -> None:
         service = self.start()
         session = self.session(service)

@@ -69,7 +69,7 @@ from ummanu.board.production_rights import (
     touches_production,
 )
 from ummanu.board.terminal_taxonomy import normalize_terminal_taxonomy
-from ummanu.dispatch.helpers import _worker_id
+from ummanu.dispatch.helpers import _worker_id, safe_one_line
 from ummanu.dispatch.origin_returns import record_return_state, succeed_origin
 from ummanu.dispatch.po_delivery import DISPATCHER_SOURCE, SUCCESSORS_PER_TICK, open_successor
 from ummanu.dispatch.state import (
@@ -88,6 +88,7 @@ from ummanu.po.client import (
     ServiceUnavailable,
 )
 from ummanu.po.queue import QueuedInput
+from ummanu.po.runner import po_provider_error
 from ummanu.po.store import (
     COMPLETED,
     FAILED,
@@ -839,7 +840,7 @@ def _episode_outcome(
     if episode is not None and (failed or time.time() - datetime.fromisoformat(
             episode["occurred_at"]).timestamp() >= 30 * 60):
         from ummanu.kernel.errors import TaskError
-        reason = ("PO execution failed without its required response" if failed
+        reason = (f"PO execution failed without its required response{_turn_failure_detail(turn)}" if failed
                   else "PO ownership episode has no required response after 30 minutes")
         try:
             runtime.writer.escalate_po_card(actor=runtime.owner, reference=ref,
@@ -857,6 +858,42 @@ def _episode_outcome(
                         "the input waits in the PO queue")
     return None
 
+
+#: The tail of a failed turn's output that holds its provider verdict.
+_TURN_TAIL_BYTES = 64 * 1024
+
+
+def _tail(path: Path) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(max(0, path.stat().st_size - _TURN_TAIL_BYTES))
+            return handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _turn_failure_detail(turn: Turn) -> str:
+    """Why a failed PO turn failed, for the escalation reason the owner reads in the bell.
+
+    The provider's refusal from the turn's output (as the PO runner's fallback reads it), else the
+    turn's recorded reason. Advisory: empty rather than an exception.
+    """
+    try:
+        where = f"PO turn {turn.session_id}/{turn.seq}"
+        stdout_path = Path(turn.stdout_path) if getattr(turn, "stdout_path", None) else None
+        stdout = _tail(stdout_path) if stdout_path is not None else ""
+        stderr = _tail(stdout_path.with_suffix(".stderr")) if stdout_path is not None else ""
+        for cli in ("claude", "codex"):
+            failure = po_provider_error(cli, stdout, "")
+            if failure is not None:
+                return f": {where} refused by {cli} ({failure.kind}): {safe_one_line(failure.summary, limit=300)}"
+        failure = po_provider_error("claude", "", stderr)
+        if failure is not None:
+            return f": {where} refused by the provider ({failure.kind}): {safe_one_line(failure.summary, limit=300)}"
+        reason = getattr(turn, "reason", None)
+        return f": {where}: {safe_one_line(reason, limit=300)}" if reason else ""
+    except Exception:  # noqa: BLE001 - an unreadable turn still escalates, with the plain reason
+        return ""
 
 def _await_owner(
     runtime: Any,
