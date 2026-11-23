@@ -4,8 +4,9 @@ The audit stream contains several memory actions. This reader accepts only recor
 `action` is `memory_search`, and pairs them with the transcript batch so the judge can tell whether a
 search actually fired near an answer (the "answered from memory without memory_search" failure).
 
-Path is overridable via UMMANU_SEARCH_LOG (default ~/ummanu-data/memory/search-log.jsonl). The file
-may not exist yet — that is not an error, it just means an empty tail.
+Path is overridable via UMMANU_SEARCH_LOG; by default it is the memory service's own
+(`ummanu.memory.search_log.search_log_path`). The file may not exist yet, which means an empty tail.
+Only the log's bounded tail is read.
 
 Timestamps: Claude transcript ts are UTC (trailing Z); the search log writes naive UTC
 (memory-mcp uses datetime.utcnow().isoformat()). Both normalize to naive UTC for comparison;
@@ -18,9 +19,10 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ummanu.memory.search_log import search_log_path, tail_lines
 from ummanu.runtime.paths import env_value
 
-DEFAULT_SEARCH_LOG = Path.home() / "ummanu-data" / "memory" / "search-log.jsonl"
+DEFAULT_SEARCH_LOG = search_log_path()
 SEARCH_LOG = Path(env_value("UMMANU_SEARCH_LOG", str(DEFAULT_SEARCH_LOG)))
 
 
@@ -39,20 +41,16 @@ def _parse(ts):
 def tail(since=None, until=None, slack_s: int = 120) -> list[dict]:
     """search-log entries whose ts falls in [since, until] (ISO strings), widened by slack_s.
 
-    Missing file -> []. Entries with an unparseable ts are dropped from a bounded window.
+    Missing file -> []. Entries with an unparseable ts are dropped from a bounded window. Only the
+    log's bounded tail is read, so a window older than it yields nothing.
     """
-    if not SEARCH_LOG.is_file():
-        return []
     lo, hi = _parse(since), _parse(until)
     if lo:
         lo -= timedelta(seconds=slack_s)
     if hi:
         hi += timedelta(seconds=slack_s)
     out = []
-    for line in SEARCH_LOG.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for line in tail_lines(SEARCH_LOG):
         try:
             rec = json.loads(line)
         except json.JSONDecodeError:

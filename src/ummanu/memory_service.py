@@ -22,7 +22,7 @@ from mcp.server.auth.provider import AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 
-from ummanu.memory import DEFAULT_MODEL, access as memory_access
+from ummanu.memory import DEFAULT_MODEL, access as memory_access, search_log
 from ummanu.memory.canon import (  # noqa: F401  # Service-level names of the canon parsing.
     fact_content_hash,
     fact_files,
@@ -33,20 +33,20 @@ from ummanu.memory.canon import (  # noqa: F401  # Service-level names of the ca
 from ummanu.memory.model import load_text_embedding
 from ummanu.runtime.paths import default_instance_path
 
-DEFAULT_MEMORY_DIR = Path.home() / "ummanu-data" / "memory"
+DEFAULT_MEMORY_DIR = search_log.DEFAULT_MEMORY_DIR
 # Canon lives in the private instance repo (docs/RECOVERY.md, "Layout"); the
 # export and the vector index stay derived under the data dir.
 DEFAULT_CANON = default_instance_path() / "state" / "memory" / "facts"
 
 CANON = Path(os.environ.get("MEMORY_CANON_ROOT", DEFAULT_CANON))
 
-DB_PATH = os.environ.get("MEMORY_DB", str(DEFAULT_MEMORY_DIR / "index.sqlite"))
+DB_PATH = str(search_log.memory_db_path())
 MODEL = os.environ.get("MEMORY_MODEL", DEFAULT_MODEL)
 PORT = int(os.environ.get("MEMORY_PORT", "8077"))
 DIM = int(os.environ.get("MEMORY_DIM", "1024"))
 MODEL_CACHE_DIR = Path(os.environ.get("MEMORY_CACHE_DIR", str(DEFAULT_MEMORY_DIR / "fastembed-cache")))
 THREADS = int(os.environ.get("MEMORY_THREADS", "1"))
-SEARCH_LOG = os.environ.get("MEMORY_SEARCH_LOG", str(Path(DB_PATH).parent / "search-log.jsonl"))
+SEARCH_LOG = str(search_log.search_log_path())
 CANON_EXPORT = (
     Path(os.environ["MEMORY_CANON_EXPORT"])
     if "MEMORY_CANON_EXPORT" in os.environ
@@ -219,9 +219,8 @@ def log_read(
         if requested_k is not None:
             entry["k"] = requested_k
         line = json.dumps(entry, ensure_ascii=False)
-        with _search_log_lock, open(SEARCH_LOG, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-            f.flush()
+        with _search_log_lock:
+            search_log.append(Path(SEARCH_LOG), line)
     except Exception:  # noqa: BLE001, S110 - Audit telemetry failure cannot block memory reads.
         pass
 
