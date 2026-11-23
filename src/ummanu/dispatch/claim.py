@@ -15,7 +15,7 @@ from typing import Any
 
 from ummanu.board.audit_contract import card_transition_of
 from ummanu.board.blocked_rework import blocked_rework
-from ummanu.board.completion_evidence import has_candidate, is_po_executed, is_wait
+from ummanu.board.completion_evidence import has_candidate, is_po_executed, is_wait, review_required
 from ummanu.broad_check import admitted_check
 from ummanu.dispatch import attempt_accounting
 from ummanu.dispatch.assessment_decision import rework_instruction
@@ -214,13 +214,13 @@ def _failover_collapse(runtime: Any, worker: HeadChoice, review: HeadChoice) -> 
     }
 
 def _comment_head_failover(
-    runtime: Any, ref: str, attempt_id: str, worker: HeadChoice, review: HeadChoice
+    runtime: Any, ref: str, attempt_id: str, worker: HeadChoice, review: HeadChoice | None
 ) -> None:
     """Write the substitution onto the card, once per claim, or do nothing."""
     lines = [
         f"{role} head {choice.head} instead of {choice.preferred}: {choice.reason}"
         for role, choice in (("Worker", worker), ("Reviewer", review))
-        if choice.substituted
+        if choice is not None and choice.substituted
     ]
     if not lines:
         return
@@ -649,12 +649,17 @@ def _prepare_claim(
             "reason": worker_choice.reason,
             "failover": {"worker": worker_choice.to_json()},
         }
-    review_choice = resolve_head(runtime, runtime.catalog.review_head(task))
-    collapse = _failover_collapse(runtime, worker_choice, review_choice)
+    # A card whose review is skipped launches no reviewer: its reviewer chain is not walked, so a
+    # dead reviewer resource cannot collapse the roles, and the card's routing keeps the canon head.
+    preferred_review_head = runtime.catalog.review_head(task)
+    review_choice = resolve_head(runtime, preferred_review_head) if review_required(task) else None
+    collapse = None if review_choice is None else _failover_collapse(runtime, worker_choice, review_choice)
     if collapse is not None:
         return dict(collapse, pilot_ref=ref)
     head = worker_choice.head
-    review_head = review_choice.head or review_choice.preferred
+    review_head = (
+        preferred_review_head if review_choice is None else review_choice.head or review_choice.preferred
+    )
     # Sprint admission is asked first: a card that may not run on its project now is refused for
     # that, and the registry and the host are not asked about it.
     sprint_refusal = _sprint_admission_refusal(runtime, task)
@@ -836,7 +841,9 @@ def _prepare_claim(
         state="claim_verified",
         claimed_at=time.time(),
         preferred_head=worker_choice.preferred if worker_choice.substituted else "",
-        preferred_review_head=(review_choice.preferred if review_choice.substituted else ""),
+        preferred_review_head=(
+            review_choice.preferred if review_choice is not None and review_choice.substituted else ""
+        ),
     )
     held = _held_candidate_workspace(runtime, claimed, record, resume)
     if held:
