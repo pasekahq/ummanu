@@ -10,6 +10,7 @@ import argparse
 import fcntl
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,9 @@ from ummanu.webproto.claude_usage import (
     finite_number,
     usage_limits,
 )
+
+#: How long the forwarded statusLine command may run before the render gives up on it.
+FORWARD_TIMEOUT_SECONDS = 10.0
 
 
 def capture(payload: bytes, home: Path, *, observed: float | None = None) -> bool:
@@ -92,8 +96,21 @@ def main() -> None:
     except Exception:  # noqa: BLE001, S110 -- collection must never break the configured statusLine
         pass
     if args.forward and len(payload) <= MAX_PAYLOAD_BYTES:
-        # Exactly the configured command, never a shell fragment taken from the CLI payload.
-        subprocess.run(args.forward, shell=True, input=payload, check=False)
+        forward(args.forward, payload)
+
+
+def forward(command: str, payload: bytes, *, timeout: float = FORWARD_TIMEOUT_SECONDS) -> None:
+    """Run the configured statusLine command on `payload`; past `timeout` its whole group is killed."""
+    # Exactly the configured command, never a shell fragment taken from the CLI payload.
+    process = subprocess.Popen(command, shell=True, stdin=subprocess.PIPE, start_new_session=True)
+    try:
+        process.communicate(payload, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
 
 
 if __name__ == "__main__":

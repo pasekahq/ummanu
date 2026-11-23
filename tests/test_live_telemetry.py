@@ -1367,6 +1367,12 @@ class HealthExpectedStateTests(unittest.TestCase):
                 self.assertIn(f"RED {role}: installed-", output)
                 self.assertIn("not active", output)
 
+    def test_a_systemctl_that_does_not_answer_reads_as_an_inactive_timer(self) -> None:
+        expired = health.subprocess.TimeoutExpired(["systemctl"], 10)
+        with mock.patch.object(health.subprocess, "run", side_effect=expired) as run:
+            self.assertFalse(health._timer_active("curator"))
+        self.assertEqual(run.call_args.kwargs["timeout"], health._SYSTEMCTL_TIMEOUT_SECONDS)
+
     def test_disabled_role_is_neutral_without_timer_or_telemetry_reads(self) -> None:
         for role, component in self.ROLES:
             with self.subTest(role=role):

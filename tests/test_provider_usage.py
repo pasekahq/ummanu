@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
@@ -1299,6 +1300,16 @@ class ClaudeStatuslineTest(unittest.TestCase):
         self.assertEqual(result.stdout, payload)
         self.assertEqual(result.stderr, b"")
         self.assertNotIn("session", self.cache.read_text())
+
+    def test_a_hung_forwarded_command_is_killed_with_everything_it_started(self) -> None:
+        from ummanu.runtime import claude_usage
+
+        pid_file = self.home / "child.pid"
+        started = time.monotonic()
+        claude_usage.forward(f"sleep 60 & echo $! > {pid_file}; wait", b"{}", timeout=1)
+        self.assertLess(time.monotonic() - started, 30)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(pid_file.read_text()), 0)
 
     def test_rerenders_and_older_sessions_cannot_refresh_or_replace_snapshot(self) -> None:
         self.record()

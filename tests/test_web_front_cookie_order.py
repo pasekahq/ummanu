@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import call, patch
@@ -99,6 +100,19 @@ class WebFrontSessionSecretTests(unittest.TestCase):
                 actor="operator",
             ),
         )
+
+
+class HashPasswordTests(unittest.TestCase):
+    def test_a_binary_that_never_answers_is_a_config_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            hung = Path(tmp) / "caddy"
+            hung.write_text("#!/bin/sh\nexec sleep 60\n", encoding="utf-8")
+            hung.chmod(0o755)
+            with (
+                patch.object(commands, "HASH_PASSWORD_TIMEOUT_SECONDS", 1),
+                self.assertRaisesRegex(commands.FrontConfigError, "did not finish within 1 s"),
+            ):
+                commands.hash_password("secret", executable=str(hung))
 
 
 if __name__ == "__main__":  # pragma: no cover

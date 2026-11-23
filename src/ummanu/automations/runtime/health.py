@@ -158,14 +158,25 @@ def _role_expectations(agents: tuple[str, ...]) -> tuple[dict[str, RoleExpectati
     return expectations, None
 
 
+_SYSTEMCTL_TIMEOUT_SECONDS = 10
+
+
 def timer_unit(agent: str, unit_prefix: str | None = None) -> str:
     return f"{unit_prefix if unit_prefix is not None else _UNIT_PREFIX}{_UNIT_COMPONENT.get(agent, agent)}.timer"
 
 
 def _timer_active(agent: str, unit_prefix: str | None = None) -> bool:
-    p = subprocess.run(
-        ["systemctl", "is-active", timer_unit(agent, unit_prefix)], capture_output=True, text=True, check=False
-    )
+    """Whether systemd reports the timer active; one that does not answer in time is not."""
+    try:
+        p = subprocess.run(
+            ["systemctl", "is-active", timer_unit(agent, unit_prefix)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_SYSTEMCTL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return p.stdout.strip() == "active"
 
 

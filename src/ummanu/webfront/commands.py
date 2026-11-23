@@ -377,6 +377,10 @@ def _read_or_create_session_secret(instance_dir: Path) -> str:
     return value
 
 
+#: A bcrypt hash takes well under a second; a binary that has not answered by then is not going to.
+HASH_PASSWORD_TIMEOUT_SECONDS = 30
+
+
 def hash_password(password: str, *, executable: str = "caddy") -> str:
     """The bcrypt hash `basicauth` checks, from the same binary that will check it.
 
@@ -390,7 +394,12 @@ def hash_password(password: str, *, executable: str = "caddy") -> str:
             capture_output=True,
             text=True,
             check=False,
+            timeout=HASH_PASSWORD_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired:
+        raise FrontConfigError(
+            f"{executable} hash-password did not finish within {HASH_PASSWORD_TIMEOUT_SECONDS:g} s"
+        ) from None
     except OSError as exc:
         raise FrontConfigError(
             f"could not run {executable!r} to hash the password ({exc}); the front's own binary "
