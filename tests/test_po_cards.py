@@ -457,7 +457,7 @@ class SettleTests(DispatcherFixture):
         self.assertIn("failed", self.cards.card["extensions"]["extra"]["owner_escalation"])
 
     def test_a_provider_refused_turn_names_the_refusal_in_the_escalation(self) -> None:
-        # quota-balancer-67: a spent Claude weekly limit, no fallback CLI; the bell must say so.
+        # A spent Claude weekly limit and no fallback CLI: the bell must say so.
         Path(str(self.log) + ".quota-claude").touch()
         self.start()
         runtime = self.runtime(card(description="An ordinary question."))

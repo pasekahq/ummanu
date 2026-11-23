@@ -859,7 +859,7 @@ def _episode_outcome(
     return None
 
 
-#: How much of a failed turn's output the escalation reads: its provider verdict is at the end.
+#: The tail of a failed turn's output that holds its provider verdict.
 _TURN_TAIL_BYTES = 64 * 1024
 
 
@@ -873,13 +873,10 @@ def _tail(path: Path) -> str:
 
 
 def _turn_failure_detail(turn: Turn) -> str:
-    """Why a failed PO turn failed, for the escalation the owner reads in the bell.
+    """Why a failed PO turn failed, for the escalation reason the owner reads in the bell.
 
-    quota-balancer-67, 2026-11-23: both PO turns were refused by a spent Claude weekly limit while
-    Codex was spent too, and the bell said only "PO execution failed without its required response".
-    The provider's own refusal is read from the turn's output (the same reader the PO runner uses for
-    its fallback); else the turn's recorded reason. Advisory: empty when neither says anything, and
-    never an exception, so the escalation itself never depends on it.
+    The provider's refusal from the turn's output (as the PO runner's fallback reads it), else the
+    turn's recorded reason. Advisory: empty rather than an exception.
     """
     try:
         where = f"PO turn {turn.session_id}/{turn.seq}"
