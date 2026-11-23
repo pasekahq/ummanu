@@ -350,7 +350,8 @@ The broker performs each `connect()` itself, on a duplicate of the head's socket
 of the address, so the head cannot change the address after the check. It allows a Unix socket inside
 a write root (and systemd-resolved). Loopback, this host's own addresses and private, link-local and
 shared ranges (containers, the LAN) are reachable only on the board port, the memory service (8077),
-DNS (53) and listeners the head opened itself; any public address is reachable (GitHub, Anthropic). TCP Fast Open sends and io_uring are refused.
+DNS (53) and listeners the head opened itself; any public address is reachable (GitHub, Anthropic). A
+vsock address (the host or its VMs) is refused. TCP Fast Open sends and io_uring are refused.
 
 Claude Code runs with `CLAUDE_CONFIG_DIR=~/.local/state/ummanu/head-sandbox/claude/<digest>`, one per
 workspace: settings, trust, `~/.claude/CLAUDE.md` and the skills the product and installation
@@ -365,7 +366,9 @@ Known limits: the board store is reached with the installation's credentials, so
 `sprint` and `issue` still read every project's cards; `ummanu knowledge write` fails because the
 knowledge tree is not writable; on a kernel before Landlock ABI 6 the head can still signal the
 runtime user's other processes and read their `/proc/<pid>/cmdline` (not their environment, memory or
-files); and the host's own git commands in the workspace still read the config the workspace points to.
+files); the host's own git commands in the workspace still read the config the workspace points to; and
+only `connect()` is brokered, so a datagram sent with a destination address (`sendto`/`sendmsg` on an
+unconnected UDP socket) reaches any port on loopback, this host and the LAN.
 
 Check a profile by hand from a worktree of its project:
 

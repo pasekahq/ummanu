@@ -263,6 +263,11 @@ class BrokerTests(unittest.TestCase):
             self.assertTrue(self.broker.permits(inet_address("140.82.112.3", 443), "/"))
             self.assertTrue(self.broker.permits(inet6_address("2606:4700::6810:84e5", 443), "/"))
 
+    def test_a_vsock_address_is_refused(self) -> None:
+        # struct sockaddr_vm: family, reserved, port, cid (VMADDR_CID_HOST), flags and padding.
+        address = struct.pack("<HHII", socket.AF_VSOCK, 0, 1234, 2) + bytes(4)
+        self.assertFalse(self.broker.permits(address, "/"))
+
     def test_a_listener_inside_the_sandbox_is_reachable(self) -> None:
         with mock.patch.object(sandbox, "sandbox_listening_ports", return_value={41000}):
             self.assertTrue(self.broker.permits(inet_address("127.0.0.1", 41000), "/"))

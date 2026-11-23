@@ -746,7 +746,8 @@ class Broker:
 
     def permits(self, raw: bytes, cwd: str) -> bool:
         """Whether a non-Unix address may be reached: loopback and this host's own addresses only on
-        an allowed port, any other network address, any other family (it cannot reach this host)."""
+        an allowed port, any other network address, never vsock (it reaches the host or its VMs),
+        any other family (it cannot reach this host)."""
         del cwd
         family = struct.unpack_from("<H", raw, 0)[0] if len(raw) >= 2 else socket.AF_UNSPEC
         if family == socket.AF_INET:
@@ -759,7 +760,7 @@ class Broker:
                 return False
             port = struct.unpack_from(">H", raw, 2)[0]
             return not self.is_local(ipaddress.IPv6Address(raw[8:24])) or self.loopback_allowed(port)
-        return family != socket.AF_UNIX
+        return family not in (socket.AF_UNIX, socket.AF_VSOCK)
 
     def is_local(self, host: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         """Loopback, this host's addresses and private ranges, where containers and the LAN live."""
