@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -837,8 +837,7 @@ def _episode_outcome(
         return _block(runtime, current, records, payload, record.attempt_id,
                       f"PO turn {turn.session_id}/{turn.seq} ended {turn.state} without completing the card")
     failed = turn is not None and turn.state == FAILED
-    if episode is not None and (failed or time.time() - datetime.fromisoformat(
-            episode["occurred_at"]).timestamp() >= 30 * 60):
+    if episode is not None and (failed or time.time() - _utc_timestamp(episode["occurred_at"]) >= 30 * 60):
         from ummanu.kernel.errors import TaskError
         reason = (f"PO execution failed without its required response{_turn_failure_detail(turn)}" if failed
                   else "PO ownership episode has no required response after 30 minutes")
@@ -861,6 +860,12 @@ def _episode_outcome(
 
 #: The tail of a failed turn's output that holds its provider verdict.
 _TURN_TAIL_BYTES = 64 * 1024
+
+
+def _utc_timestamp(text: str) -> float:
+    """The epoch of an audit time; one written without a zone is UTC, as every audit time is."""
+    moment = datetime.fromisoformat(text)
+    return (moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)).timestamp()
 
 
 def _tail(path: Path) -> str:

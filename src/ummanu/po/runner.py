@@ -1245,10 +1245,12 @@ class PoRunner:
     @staticmethod
     def _stderr_tail(files: TurnFiles) -> str:
         try:
-            data = files.stderr.read_bytes()
+            with files.stderr.open("rb") as stream:
+                stream.seek(max(0, stream.seek(0, os.SEEK_END) - STDERR_TAIL_BYTES))
+                data = stream.read(STDERR_TAIL_BYTES)
         except OSError:
             return ""
-        return data[-STDERR_TAIL_BYTES:].decode("utf-8", errors="replace").strip()
+        return data.decode("utf-8", errors="replace").strip()
 
     def _capture_thread_id(self, session: Session, stdout_path: Path, stdout: str | None = None) -> None:
         """Keep Codex's thread id from any turn that reached it, so the next turn can resume."""
