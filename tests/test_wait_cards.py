@@ -442,6 +442,25 @@ class SpecTests(unittest.TestCase):
         # The spec round-trips through the card's extension bag, where it is JSON text.
         self.assertEqual(wait_card.wait_spec(wait_doc(by_repo)), by_repo)
 
+    def test_each_target_kind_is_described_with_its_deadline_and_return_addresses(self) -> None:
+        cases = (
+            (spec(card="ummanu-12", states="done,blocked"), "Waits for card ummanu-12 reaching done or blocked."),
+            (spec(), f"Waits for GitHub Actions run {REPO}#{RUN_ID} ({RUN_URL})."),
+            (spec(until="2026-09-27T13:30:00Z"), "Waits for the time 2026-09-27T13:30:00Z."),
+        )
+        for value, first in cases:
+            with self.subTest(kind=value.target.kind):
+                text = wait_card.describe_wait(value, sprint=SPRINT, dod_item="d2")
+                self.assertEqual(text.splitlines()[0], first)
+                self.assertIn(f"Part of {SPRINT}, DoD item d2.", text)
+                self.assertIn("Deadline 2026-09-27T14:00:00Z", text)
+                self.assertIn("moves to Blocked", text)
+        returns = spec(returns=("observer", "dependents", "po-session:s-1"))
+        self.assertIn(
+            "goes to the sprint's observer, the cards blocked by this one, PO session s-1.",
+            wait_card.describe_wait(returns),
+        )
+
     def test_every_malformed_input_is_refused_with_a_reason(self) -> None:
         cases = (
             ({"deadline": "2h", "returns": ["observer"]}, "exactly one target"),
@@ -577,6 +596,37 @@ class CreateValidationTests(unittest.TestCase):
             self.create("observer")
         self.assertEqual(raised.exception.code, "validation")
         self.assertNothingWritten()
+
+    def test_a_wait_created_without_a_description_carries_its_spec_in_prose(self) -> None:
+        written: list[str] = []
+
+        def capture(*_args: Any, description: str, **_fields: Any) -> str:
+            written.append(description)
+            raise SimulatedCrash
+
+        wait = {"card": "ummanu-12", "states": "done", "deadline": "2h", "returns": ["observer"]}
+        sprint = {
+            "ref": SPRINT,
+            "status": "open",
+            "reservations": ["ummanu"],
+            "dod": {"structured": True, "items": [{"id": "d1", "state": "open"}]},
+        }
+        with (
+            mock.patch("ummanu.sprints.SprintReader.show", return_value=sprint),
+            mock.patch.object(TaskWriter, "_guard_sprint_write", return_value={}),
+            mock.patch.object(TaskWriter, "_create_backend", side_effect=capture),
+            mock.patch.object(self.writer, "audit") as audit,
+            mock.patch.object(TaskWriter, "_mutation", return_value=contextlib.nullcontext()),
+        ):
+            audit.committed_event.return_value = audit.pending_event.return_value = None
+            for given in ("", "the owner's own words"):
+                with self.subTest(given=given), self.assertRaises(SimulatedCrash):
+                    self.create(wait=wait, sprint=SPRINT, dod_item="d1", description=given)
+        generated, explicit = written
+        self.assertTrue(generated.startswith("Waits for card ummanu-12 reaching done."))
+        self.assertIn(f"Part of {SPRINT}, DoD item d1.", generated)
+        self.assertIn("the sprint's observer", generated)
+        self.assertEqual(explicit, "the owner's own words")
 
     def test_only_the_observer_and_the_po_cut_one(self) -> None:
         for role in ("worker", "reviewer", "retro", "steward"):

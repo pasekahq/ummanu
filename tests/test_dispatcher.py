@@ -1001,6 +1001,26 @@ class DispatcherRuntimeTests(DispatcherRuntimeFixture, unittest.TestCase):
         self.assertNotIn("prepare_worker", self.host.calls)
         self.assertIn("worker and reviewer on the same head claude-opus", result["reason"])
 
+    def test_a_review_skipped_card_is_claimed_whatever_the_reviewer_chain_says(self) -> None:
+        """No reviewer is launched for a review-skipped card, so its chain cannot collapse the roles."""
+        self.start_dispatcher()
+        self.board.save_metadata(12, review="skipped")
+        self.catalog.profiles["codex"] = dict(self.catalog.profiles["codex"], fallback=["claude-opus"])
+        self.catalog.profiles["codex-reviewer"] = dict(
+            self.catalog.profiles["codex-reviewer"], fallback=["claude-opus"]
+        )
+        self.runtime.head_readiness = self.readiness_by_resource(
+            {"openai-sub": ("exhausted", "resource quota is spent")}
+        )
+
+        result = self.tick()
+
+        self.assertNotEqual(result.get("action"), "failover-collapses-roles")
+        self.assertIn("prepare_worker", self.host.calls)
+        self.assertNotEqual(self.reader.show("ummanu-510")["state"], "ready")
+        record = self.runtime.production_state.load()["records"]["ummanu-510"]
+        self.assertEqual((record["head"], record["review_head"]), ("claude-opus", "codex-reviewer"))
+
     def test_one_canon_head_for_both_roles_is_still_claimed(self) -> None:
         """The refusal above is about failover, not about role routing: an installation that points
         both roles at one head has decided that itself, and a green resource still claims."""

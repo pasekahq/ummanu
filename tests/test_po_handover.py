@@ -13,8 +13,10 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
+import os
 import tempfile
 import threading
+import time
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -448,6 +450,17 @@ class EscalationTests(WriterFixture):
         with self.assertRaises(ReadRefused):
             self.client.owner_events.mark_read(event.id)
         self.advance(self.runtime(), 1900)
+        self.assertEqual(len(self.client.owner_events.of_kind("po_card_escalated")), 1)
+
+    def test_an_episode_time_without_a_zone_is_read_as_utc_on_any_host_zone(self) -> None:
+        runtime = self.runtime()
+        self.writer.audit.committed["claim-episode"]["occurred_at"] = SINCE.removesuffix("Z")
+        self.addCleanup(time.tzset)  # runs after the environment below is restored
+        self.enterContext(mock.patch.dict(os.environ, {"TZ": "Asia/Tokyo"}))
+        time.tzset()
+        self.advance(runtime, 1799)
+        self.assertEqual(self.client.owner_events.kinds(), [])
+        self.advance(runtime, 1800)
         self.assertEqual(len(self.client.owner_events.of_kind("po_card_escalated")), 1)
 
     def test_execution_failure_escalates_immediately_but_owner_interruption_does_not(self) -> None:

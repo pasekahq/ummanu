@@ -15,4 +15,6 @@ Environment=UMMANU_RUNTIME_PYTHONPATH={{UMMANU_PRODUCT_ROOT}}
 Environment=UMMANU_REPO={{UMMANU_PRODUCT_ROOT}}
 Environment=UMMANU_RUNTIME_ENV_FILE={{UMMANU_INSTANCE_PATH}}/runtime.env
 Environment=UMMANU_INSTANCE={{UMMANU_INSTANCE_PATH}}
+# The memory service's index, beside which retro finds the search log that service writes.
+Environment=MEMORY_DB={{UMMANU_DATA_DIR}}/memory/index.sqlite
 ExecStart={{UMMANU_PRODUCT_ROOT}}/scripts/ummanu-agent-gate.sh retro

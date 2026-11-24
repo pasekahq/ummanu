@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from ummanu._fsutil import file_lock, publish_state_atomic
+from ummanu._proc import run_isolated
 from ummanu.config import ConfigError, DataDirError, load_config, validate
 from ummanu.onboarding import (
     IDENTITY_FIELDS,
@@ -253,17 +254,9 @@ def _base_result(draft: dict[str, Any], run_id: str, provision_run: str, digest:
 
 
 def _command(command: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run an adapter command in its own process group; a timeout kills everything it started."""
     try:
-        return subprocess.run(
-            command,
-            cwd=cwd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            timeout=_COMMAND_TIMEOUT,
-            check=False,
-        )
+        return run_isolated(["/bin/sh", "-c", command], input="", cwd=cwd, timeout=_COMMAND_TIMEOUT)
     except subprocess.TimeoutExpired as exc:
         return _timed_out(exc)
 

@@ -46,7 +46,7 @@ exit codes and numeric fallback policies otherwise retain their existing behavio
 | CURATOR_MAX_ROWS_PER_SOURCE | curator.harvest.Limits | per call R; positive integer (errors name selected spelling), default 512 |
 | CURATOR_MAX_RECORD_BYTES | curator.harvest.Limits | per call R; positive integer (errors name selected spelling), default 65536 |
 | CURATOR_MAX_MEMORY_BYTES | curator.harvest.Limits | per call R; positive integer (errors name selected spelling), default 65536 |
-| SEARCH_LOG | retro.search_log | import R; HOME/ummanu-data/memory/search-log.jsonl |
+| SEARCH_LOG | retro.search_log | import R; the memory service's own log: `MEMORY_SEARCH_LOG`, else `search-log.jsonl` beside `MEMORY_DB`, else HOME/ummanu-data/memory/search-log.jsonl (`memory.search_log`); rotated to `.1` past 8 MiB, read from its last 4 MiB |
 | STEWARD_STALE_HOURS | steward.signals | import R; raw float, default 24; existing acceptance of nonfinite floats unchanged |
 | HEALTH_MAX_AGE_S | automations.runtime.health | import N; positive integer when supplied, otherwise spec health.max_age_s or cadence; diagnostics name the selected spelling |
 | PRODUCTION_STATE | production_telemetry | per call N; data-dir/dispatcher/production-state.json |

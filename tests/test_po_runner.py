@@ -23,8 +23,10 @@ from tests.po_cli_fakes import FAKE_CLAUDE, FAKE_CODEX, SETTLE_SECONDS, eventual
 from tests.sql_backend_fixtures import PostgresBoard
 from ummanu.po import store as po_store
 from ummanu.po.runner import (
+    STDERR_TAIL_BYTES,
     PoRunner,
     RunnerError,
+    TurnFiles,
     claude_resolved_model,
     codex_resolved_model,
     codex_thread_id,
@@ -670,6 +672,21 @@ class PoRunnerTests(unittest.TestCase):
             po_store.session_fingerprint("claude", "opus"),
             po_store._digest([po_store.SESSION_CREATE, "claude", "opus"]),
         )
+
+
+class StderrTailTests(unittest.TestCase):
+    def test_only_the_tail_of_a_long_stderr_is_read(self) -> None:
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        stderr = directory / "turn.stderr"
+        stderr.write_bytes(b"head-marker\n" + b"x" * (STDERR_TAIL_BYTES * 4) + b"\nlast line\n")
+        files = TurnFiles(directory, directory / "p", directory / "o", stderr, directory / "m")
+
+        tail = PoRunner._stderr_tail(files)
+
+        self.assertTrue(tail.endswith("last line"))
+        self.assertNotIn("head-marker", tail)
+        self.assertLessEqual(len(tail.encode()), STDERR_TAIL_BYTES)
+        self.assertEqual(PoRunner._stderr_tail(TurnFiles(directory, *(directory / n for n in "pomz"))), "")
 
 
 class ResolvedModelParsingTests(unittest.TestCase):

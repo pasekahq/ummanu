@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
@@ -80,6 +81,19 @@ def test_old_codex_session_is_truthfully_stale_when_live_read_fails(tmp_path: Pa
     assert codex["status"] == "stale"
     assert codex["windows"][0]["remaining_percent"] == 20.0
     assert codex["reason"] == "Latest Codex usage observation is stale"
+
+
+def _dead(pid: int, wait: float = 5.0) -> bool:
+    """Whether `pid` is gone or a zombie: a killed grandchild waits for whichever reaper adopted it."""
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[0]
+        except (FileNotFoundError, ProcessLookupError):
+            return True
+        if state == "Z" or time.monotonic() >= deadline:
+            return state == "Z"
+        time.sleep(0.05)
 
 
 class ClaudeRequestHeadersTest(unittest.TestCase):
@@ -1299,6 +1313,15 @@ class ClaudeStatuslineTest(unittest.TestCase):
         self.assertEqual(result.stdout, payload)
         self.assertEqual(result.stderr, b"")
         self.assertNotIn("session", self.cache.read_text())
+
+    def test_a_hung_forwarded_command_is_killed_with_everything_it_started(self) -> None:
+        from ummanu.runtime import claude_usage
+
+        pid_file = self.home / "child.pid"
+        started = time.monotonic()
+        claude_usage.forward(f"sleep 60 & echo $! > {pid_file}; wait", b"{}", timeout=1)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertTrue(_dead(int(pid_file.read_text())))
 
     def test_rerenders_and_older_sessions_cannot_refresh_or_replace_snapshot(self) -> None:
         self.record()
