@@ -1004,11 +1004,8 @@ class TaskWriter(DispatcherTaskWrites, SprintGuardMixin, RecoveryMixin):
                 "validation", f"the --wait-* flags belong to a wait card; a {task_type} card takes none", 2
             )
         # The request binds the caller's description; a wait card given none carries its spec in prose.
-        card_description = (
-            wait_card.describe_wait(spec, sprint=sprint, dod_item=dod_item)
-            if spec is not None and not description.strip()
-            else description
-        )
+        card_description = (description if spec is None or description.strip()
+                            else wait_card.describe_wait(spec, sprint=sprint, dod_item=dod_item))
         # The production an operation card touches (secretary-1764), checked against the registry
         # `sprint create --allow-production` reads, and refused on every other kind.
         registered = None

@@ -83,6 +83,19 @@ def test_old_codex_session_is_truthfully_stale_when_live_read_fails(tmp_path: Pa
     assert codex["reason"] == "Latest Codex usage observation is stale"
 
 
+def _dead(pid: int, wait: float = 5.0) -> bool:
+    """Whether `pid` is gone or a zombie: a killed grandchild waits for whichever reaper adopted it."""
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            state = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[0]
+        except (FileNotFoundError, ProcessLookupError):
+            return True
+        if state == "Z" or time.monotonic() >= deadline:
+            return state == "Z"
+        time.sleep(0.05)
+
+
 class ClaudeRequestHeadersTest(unittest.TestCase):
     def test_usage_sends_cli_compatibility_headers(self) -> None:
         directory = tempfile.TemporaryDirectory()
@@ -1308,8 +1321,7 @@ class ClaudeStatuslineTest(unittest.TestCase):
         started = time.monotonic()
         claude_usage.forward(f"sleep 60 & echo $! > {pid_file}; wait", b"{}", timeout=1)
         self.assertLess(time.monotonic() - started, 30)
-        with self.assertRaises(ProcessLookupError):
-            os.kill(int(pid_file.read_text()), 0)
+        self.assertTrue(_dead(int(pid_file.read_text())))
 
     def test_rerenders_and_older_sessions_cannot_refresh_or_replace_snapshot(self) -> None:
         self.record()
