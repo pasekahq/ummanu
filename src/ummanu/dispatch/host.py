@@ -853,6 +853,20 @@ class CommandHostRuntime(ObserverHostMixin, WorkspaceEnvironmentMixin, HeadLifec
             return WorkspaceReading(unknown=str(exc))
         return read_round_workspace(self._run, record.workspace, f"origin/{base}")
 
+    def base_commit(self, task: dict[str, Any], record: DispatcherRecord) -> str:
+        """The fetched `origin/<base>` commit of the worker checkout, or "" when it cannot be read."""
+        if self.mode == "noop" or not record.workspace:
+            return ""
+        try:
+            base = self.catalog.integration_base(task["project"], task.get("workspace", {}).get("base_branch"))
+            completed = self._run(
+                ["git", "-C", record.workspace, "rev-parse", "--verify", f"origin/{base}^{{commit}}"],
+                "review outcome base",
+            )
+        except (HostError, KeyError):
+            return ""
+        return completed.stdout.strip()
+
     def reconcile_reviewed_base_move(
         self,
         task: dict[str, Any],

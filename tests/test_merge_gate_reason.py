@@ -115,7 +115,7 @@ class MergeGateReasonTests(unittest.TestCase):
                 with self.subTest(receipt=value):
                     gate_lifecycle.accept_green_gate(
                         self.runtime, self.task, self.record, self.records, {}, "tick-attempt",
-                        GateResult("green", "green", attestation=value), stage="release",
+                        GateResult("green", "green", attestation=value), stage="release", review_outcome=None,
                     )
                     self.assertEqual(self.terminal.call_args.kwargs["blocked_reason"], "gate")
         gate_lifecycle.gate_red_to_worker(

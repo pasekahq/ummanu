@@ -31,7 +31,7 @@ from ummanu.dispatch import (
     runtime as runtime_module,
 )
 from ummanu.dispatch.gate import GateResult
-from ummanu.dispatch.gate_receipt import AcceptedGreenGate
+from ummanu.dispatch.gate_receipt import AcceptedGreenGate, InvalidAttestation, mint_gate_receipt
 from ummanu.dispatch.production import _budget_event_type
 from ummanu.dispatch.stage_migration import reconcile_validation
 from ummanu.dispatch.state import DispatcherRecord
@@ -300,7 +300,7 @@ class ReleaseAdmissionTests(unittest.TestCase):
              "transition": {"source": "review", "target": "assessment"}},
         ]
         self.writer.audit.events.side_effect = lambda _: self.events
-        self.gate = AcceptedGreenGate.accept({}, current_sha="a" * 40, gate_mode="none", noop=False)
+        self.gate = AcceptedGreenGate.accept({}, current_sha="a" * 40, reviewed_sha="", gate_mode="none", noop=False)
 
     def admit(self, gate=None, decision=""):
         self.writer.admit_release(role="dispatcher", actor="dispatcher", reference="sample-1", decision=decision,
@@ -308,7 +308,7 @@ class ReleaseAdmissionTests(unittest.TestCase):
 
     def test_automatic_release_needs_green_policy_report_and_verdict(self):
         self.admit(self.gate)
-        for gate in (None, AcceptedGreenGate(None, False), True):
+        for gate in (None, AcceptedGreenGate(InvalidAttestation("no green gate")), True):
             with self.subTest(gate=gate), self.assertRaises(TaskError):
                 self.admit(gate)
         self.events.pop(1)
@@ -502,3 +502,202 @@ class OperationalConsumerTests(unittest.TestCase):
                 event.update(ref="sample-1", request_id="restart")
                 self.assertTrue(is_candidate(event))
                 self.assertEqual(_budget_event_type(event), "preempt")
+
+
+class _Crash(BaseException):
+    """A dispatcher process dying mid-tick, after its last saved write."""
+
+
+class PostReviewOutcomeTests(unittest.TestCase):
+    """The review → gate → merge lifecycle ends unchanged, reconciled or rework at both seams."""
+
+    REVIEWED, MERGED, REMERGED, BASE = "a" * 40, "c" * 40, "d" * 40, "b" * 40
+
+    def setUp(self):
+        self.task = {"ref": "sample-1", "type": "code", "project": "sample", "state": "review",
+                     "review": "required", "sprint": "", "comments": []}
+        self.record = DispatcherRecord(
+            worker="worker", workspace="/candidate", handle="worker", head="worker", review_head="reviewer",
+            attempt_id="held", state="reviewing", claimed_at=1, comment_baseline=0, review_baseline=0,
+            report_generation=1, review_commit=self.REVIEWED,
+        )
+        self.records = {self.task["ref"]: self.record}
+        self.saved = self.record.to_json()
+        self.head = self.REVIEWED
+        self.gate_moves: list[str] = []
+        self.base_only: set[tuple[str, str]] = set()
+        self.receipt_on: str | None = None
+        self.mode, self.noop = "github", False
+        self.comments: list[str] = []
+        runtime = self.runtime = mock.Mock()
+        runtime.owner = "dispatcher"
+        runtime.host.mode = "real"
+        runtime.host.head_commit.side_effect = lambda _record: self.head
+        runtime.host.base_commit.return_value = self.BASE
+        runtime.host.reconcile_reviewed_base_move.side_effect = self.reconcile
+        runtime.host.gate_check.side_effect = self.gate
+        runtime.host.complete_green.return_value = None
+        runtime.host.teardown.return_value = None
+        runtime.audit.events.return_value = []
+        runtime.audit.committed_event.return_value = None
+        runtime.audit.pending_event.return_value = None
+        runtime.reader.show.side_effect = lambda _: copy.deepcopy(self.task)
+        runtime.writer.comment.side_effect = lambda **kwargs: self.comments.append(kwargs["body"])
+        runtime._end_review_pane_confirmed.return_value = None
+        runtime.save_records.side_effect = lambda *_: setattr(self, "saved", self.record.to_json())
+        self.terminal = self.enterContext(mock.patch.object(release_lifecycle.attempt_accounting, "terminal_effect"))
+        self.rework = self.enterContext(mock.patch.object(
+            gate_lifecycle, "_begin_red_transition", return_value={"action": "review-freeze-red-rework"}))
+        self.enterContext(mock.patch.object(review_verdict.attempt_accounting, "record_attempt_usage"))
+        self.enterContext(mock.patch.object(review_verdict.e2e_stage, "run_stage", return_value=None))
+        self.enterContext(mock.patch.object(review_verdict, "parks_for_decision", return_value=True))
+        for module in (gate_lifecycle, release_lifecycle):
+            name = "_validation_ci" if module is gate_lifecycle else "validation_ci"
+            self.enterContext(mock.patch.object(module, name, side_effect=lambda *_: self.mode))
+
+    def gate(self, task, record):
+        """The gate's base refresh moves HEAD first; an executed gate attests the HEAD it ran on."""
+        if self.gate_moves:
+            self.head = self.gate_moves.pop(0)
+        if self.noop:
+            return GateResult("green", "noop gate")
+        if self.mode == "none":
+            return GateResult("green", "ci none: mechanical gate skipped")
+        receipt = mint_gate_receipt(
+            validated_sha=self.receipt_on or self.head, base_sha=self.BASE, gate_mode=self.mode,
+            required_checks=[{"name": "test", "conclusion": "SUCCESS", "url": ""}], check_set_identity="fixture",
+        )
+        return GateResult("green", "CI green", attestation=receipt)
+
+    def reconcile(self, task, record, reviewed, current):
+        if (reviewed, current) not in self.base_only:
+            return None
+        return {"reviewed_sha": reviewed, "head_sha": current, "base_sha": self.BASE, "reviewed_paths": 2}
+
+    def park(self):
+        self.runtime.host.mode = "noop" if self.noop else "real"
+        return review_verdict.park_green_verdict(
+            self.runtime, self.task, self.record, self.records, {}, "tick")
+
+    def release(self):
+        self.runtime.host.mode = "noop" if self.noop else "real"
+        if not self.record.worker_continuation.parked:
+            self.record.worker_continuation.begin_park("review", 0, "review:green", "green")
+            self.record.worker_continuation.confirm_park()
+        self.task["state"] = "assessment"
+        return release_lifecycle.release_parked(
+            self.runtime, self.task, self.record, self.records, {}, "tick")
+
+    def assert_rework_at_validate(self, outcome, head, cause):
+        self.assertEqual(outcome["action"], "review-freeze-red-rework")
+        self.assertEqual(self.rework.call_args.kwargs["phase"], "review-freeze")
+        reason = self.rework.call_args.kwargs["move_reason"]
+        for fact in ("post-review outcome `rework`", f"reviewed SHA `{self.REVIEWED}`", f"HEAD `{head}`",
+                     f"base SHA `{self.BASE}`", cause, "fresh review"):
+            self.assertIn(fact, reason)
+        self.runtime.writer.move.assert_not_called()
+
+    def assert_rework_at_release(self, outcome, head, cause):
+        self.assertEqual(outcome["status"], "blocked")
+        terminal = self.terminal.call_args.kwargs
+        self.assertEqual(terminal["target"], "blocked")
+        self.assertEqual(terminal["blocked_reason"], "implementation")
+        for fact in ("post-review outcome `rework`", f"reviewed SHA `{self.REVIEWED}`", f"HEAD `{head}`",
+                     f"base SHA `{self.BASE}`", cause):
+            self.assertIn(fact, terminal["reason"])
+        self.runtime.host.complete_green.assert_not_called()
+
+    def assert_reconciled_release_audit(self, head):
+        audit = self.comments[-1]
+        self.assertIn("release audit", audit)
+        for fact in ("post-review outcome `reconciled`", f"reviewed SHA `{self.REVIEWED}`",
+                     f"HEAD `{head}`", f"base SHA `{self.BASE}`", "reviewed paths unchanged"):
+            self.assertIn(fact, audit)
+
+    def test_base_move_outside_candidate_paths_with_a_receipt_releases_without_a_new_review(self):
+        for mode in ("local", "github"):
+            with self.subTest(mode=mode):
+                self.setUp()
+                self.mode = mode
+                self.gate_moves = [self.MERGED]
+                self.base_only = {(self.REVIEWED, self.MERGED)}
+                self.assertEqual(self.park()["to"], "assessment")
+                self.rework.assert_not_called()
+                self.assertEqual(self.record.review_commit, self.REVIEWED)
+                self.assertEqual(self.record.gate_attestation["validated_sha"], self.MERGED)
+                self.assertEqual(self.release()["to"], "done")
+                self.runtime.host.complete_green.assert_called_once()
+                self.assert_reconciled_release_audit(self.MERGED)
+                self.rework.assert_not_called()
+
+    def test_paths_overlapping_the_base_give_rework_with_a_fresh_review(self):
+        overlap = "the commits since the reviewed SHA are not base-only over unchanged candidate paths"
+        self.gate_moves = [self.MERGED]
+        self.assert_rework_at_validate(self.park(), self.MERGED, overlap)
+        self.setUp()
+        self.gate_moves = [self.MERGED]
+        self.assert_rework_at_release(self.release(), self.MERGED, overlap)
+
+    def test_ci_none_and_noop_with_a_moved_head_are_invalid_attestation_and_rework(self):
+        for mode, noop in (("none", False), ("local", True)):
+            policy = "noop" if noop else "ci none"
+            cause = f"InvalidAttestation: a {policy} gate admits only the reviewed SHA"
+            for seam in ("validate", "release"):
+                with self.subTest(mode=mode, noop=noop, seam=seam):
+                    self.setUp()
+                    self.mode, self.noop = mode, noop
+                    self.head = self.MERGED
+                    self.base_only = {(self.REVIEWED, self.MERGED)}
+                    if seam == "validate":
+                        self.assert_rework_at_validate(self.park(), self.MERGED, cause)
+                    else:
+                        self.assert_rework_at_release(self.release(), self.MERGED, cause)
+                    self.runtime.host.reconcile_reviewed_base_move.assert_not_called()
+
+    def test_ci_none_at_the_reviewed_sha_stays_receiptless_and_releases(self):
+        self.mode = "none"
+        self.assertEqual(self.park()["to"], "assessment")
+        self.assertEqual(self.release()["to"], "done")
+        self.runtime.host.complete_green.assert_called_once()
+
+    def test_a_second_base_move_is_recomputed_from_the_reviewed_sha_and_needs_its_own_receipt(self):
+        self.gate_moves = [self.MERGED, self.REMERGED]
+        self.base_only = {(self.REVIEWED, self.MERGED), (self.REVIEWED, self.REMERGED)}
+        self.assertEqual(self.park()["to"], "assessment")
+        self.assertEqual(self.release()["to"], "done")
+        reconciled = self.runtime.host.reconcile_reviewed_base_move.call_args_list
+        self.assertIn(self.REMERGED, {call.args[3] for call in reconciled})
+        self.assertEqual({call.args[2] for call in reconciled}, {self.REVIEWED})
+        self.assert_reconciled_release_audit(self.REMERGED)
+
+        self.setUp()
+        self.gate_moves = [self.MERGED, self.REMERGED]
+        self.base_only = {(self.REVIEWED, self.MERGED), (self.REVIEWED, self.REMERGED)}
+        self.assertEqual(self.park()["to"], "assessment")
+        self.receipt_on = self.MERGED
+        self.assert_rework_at_release(
+            self.release(), self.REMERGED, "InvalidAttestation: no valid github exact-SHA receipt for HEAD")
+
+    def test_a_restart_between_recovery_and_the_merge_recomputes_the_outcome(self):
+        self.gate_moves = [self.MERGED]
+        self.base_only = {(self.REVIEWED, self.MERGED)}
+        self.runtime.writer.admit_release.side_effect = _Crash
+        with self.assertRaises(_Crash):
+            self.release()
+        self.assertEqual(self.saved["gate_state"], "green")
+        self.assertEqual(self.saved["gate_attestation"]["validated_sha"], self.MERGED)
+        # The base moved again before the restart and its merge overlaps the candidate paths.
+        self.record = DispatcherRecord.from_json(copy.deepcopy(self.saved))
+        self.records = {self.task["ref"]: self.record}
+        self.runtime.writer.admit_release.side_effect = None
+        self.gate_moves = [self.REMERGED]
+        self.assert_rework_at_release(
+            self.release(), self.REMERGED,
+            "the commits since the reviewed SHA are not base-only over unchanged candidate paths")
+
+    def test_a_head_move_after_release_admission_blocks_the_merge(self):
+        self.gate_moves = [self.MERGED]
+        self.base_only = {(self.REVIEWED, self.MERGED)}
+        self.runtime.writer.admit_release.side_effect = lambda **_: setattr(self, "head", self.REMERGED)
+        self.assert_rework_at_release(
+            self.release(), self.REMERGED, "InvalidAttestation: no valid github exact-SHA receipt for HEAD")

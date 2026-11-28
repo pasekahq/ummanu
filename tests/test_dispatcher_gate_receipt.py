@@ -15,10 +15,16 @@ from ummanu.dispatch.gate import GateResult
 from ummanu.dispatch.gate_receipt import (
     AcceptedGreenGate,
     GateReceipt,
+    ReviewOutcome,
     mint_gate_receipt,
 )
 from ummanu.dispatch.state import DispatcherRecord
 from ummanu.tasks import TaskError
+
+
+def _reconciled(facts: dict) -> ReviewOutcome:
+    return ReviewOutcome("reconciled", facts["reviewed_sha"], facts["head_sha"], facts["base_sha"],
+                         facts["reviewed_paths"], "")
 
 
 class AttestationEffectTests(unittest.TestCase):
@@ -75,20 +81,20 @@ class AttestationEffectTests(unittest.TestCase):
         self.comments.append({"body": "[dispatcher]\n" + body, "marker": role})
         return {"replayed": False}
 
-    def accept(self, receipt=None, *, stage="assessment", reconciliation=None):
+    def accept(self, receipt=None, *, stage="assessment", reconciliation=None, review=None):
         return gate_lifecycle.accept_green_gate(
             self.runtime, {"ref": self.ref}, self.record, {self.ref: self.record}, {},
             self.record.attempt_id, GateResult("green", "CI", attestation=receipt or self.receipt()),
-            stage=stage, e2e_reconciliation=reconciliation,
+            stage=stage, review_outcome=review, e2e_reconciliation=reconciliation,
         )
 
     def reload(self):
         self.record = DispatcherRecord.from_json(json.loads(json.dumps(self.saves[-1])))
 
-    def context(self, *, stage="assessment", reconciliation=None):
+    def context(self, *, stage="assessment", reconciliation=None, review=None):
         return gate_attestation.delivery_context(
-            self.record, ref=self.ref, owner=self.runtime.owner,
-            attempt_id=self.record.attempt_id, stage=stage, e2e_reconciliation=reconciliation,
+            self.record, ref=self.ref, owner=self.runtime.owner, attempt_id=self.record.attempt_id,
+            stage=stage, review_outcome=review, e2e_reconciliation=reconciliation,
         )
 
     def test_original_bytes_survive_later_observation_and_restart_at_both_call_sites(self):
@@ -250,8 +256,7 @@ class AttestationEffectTests(unittest.TestCase):
         assert receipt is not None
         facts = {"reviewed_sha": "a" * 40, "head_sha": "a" * 40,
                  "base_sha": "b" * 40, "reviewed_paths": 3}
-        self.record.review_reconciliation = facts
-        context = self.context(stage="release", reconciliation=facts)
+        context = self.context(stage="release", reconciliation=facts, review=_reconciled(facts))
         body = gate_attestation.render_body(receipt, context)
         request_id = gate_attestation.legacy_request(receipt, context)
         event = {"request_id": request_id, "event_id": "release-original", "kind": "commented",
@@ -260,12 +265,13 @@ class AttestationEffectTests(unittest.TestCase):
         self.events[request_id] = event
         self.comments.extend([{"marker": "review:green", "body": "review context"}] * self.record.review_baseline)
         self.comments.append({"marker": "dispatcher", "body": body})
-        self.assertIsNone(self.accept(receipt.as_dict(), stage="release", reconciliation=facts))
+        self.assertIsNone(self.accept(receipt.as_dict(), stage="release", reconciliation=facts,
+                                      review=_reconciled(facts)))
         effect = next(iter(self.record.gate_attestation_effects.values()))
         self.assertEqual(effect["request_id"], request_id)
         changed = {**facts, "base_sha": "c" * 40}
-        self.record.review_reconciliation = changed
-        self.assertIsNone(self.accept(receipt.as_dict(), stage="release", reconciliation=changed))
+        self.assertIsNone(self.accept(receipt.as_dict(), stage="release", reconciliation=changed,
+                                      review=_reconciled(changed)))
         self.assertEqual(self.events[request_id], event)
         self.assertEqual(len(self.record.gate_attestation_effects), 2)
 
@@ -306,24 +312,22 @@ class AttestationEffectTests(unittest.TestCase):
             for key, value in (("reviewed_sha", "c" * 40), ("head_sha", "c" * 40),
                                ("base_sha", "c" * 40), ("reviewed_paths", 4)):
                 with self.subTest(source=source, key=key):
-                    self.record.review_reconciliation = facts if source == "review" else None
+                    review = _reconciled(facts) if source == "review" else None
                     e2e = facts if source == "e2e" else None
-                    self.assertIsNone(self.accept(receipt, stage="release", reconciliation=e2e))
-                    context = self.context(stage="release", reconciliation=e2e)
+                    self.assertIsNone(self.accept(receipt, stage="release", reconciliation=e2e, review=review))
+                    context = self.context(stage="release", reconciliation=e2e, review=review)
                     before_id = gate_attestation.semantic_identity(GateReceipt.accept(receipt, current_sha=self.sha), context)
                     changed = {**facts, key: value}
-                    self.record.review_reconciliation = changed if source == "review" else None
+                    review = _reconciled(changed) if source == "review" else None
                     e2e = changed if source == "e2e" else None
-                    changed_context = self.context(stage="release", reconciliation=e2e)
+                    changed_context = self.context(stage="release", reconciliation=e2e, review=review)
                     self.assertNotEqual(before_id, gate_attestation.semantic_identity(
                         GateReceipt.accept(receipt, current_sha=self.sha), changed_context))
-                    self.assertIsNone(self.accept(receipt, stage="release", reconciliation=e2e))
+                    self.assertIsNone(self.accept(receipt, stage="release", reconciliation=e2e, review=review))
                     original = copy.deepcopy((self.comments, self.events))
                     self.reload()
-                    # The real release admission recalculates these transient facts each tick.
-                    self.record.review_reconciliation = changed if source == "review" else None
                     self.assertIsNone(self.accept({**receipt, "completed_at": "2026-10-01T00:00:00+00:00"},
-                                                  stage="release", reconciliation=e2e))
+                                                  stage="release", reconciliation=e2e, review=review))
                     self.assertEqual((self.comments, self.events), original)
 
 
@@ -468,7 +472,7 @@ class AttestationLifecycleTests(DispatcherRuntimeFixture, unittest.TestCase):
         assert receipt is not None
         context = gate_attestation.delivery_context(
             record, ref=CARD_REF, owner=self.runtime.owner, attempt_id=record.attempt_id,
-            stage="assessment", e2e_reconciliation=None,
+            stage="assessment", review_outcome=None, e2e_reconciliation=None,
         )
         request_id = gate_attestation.effect_request(context, gate_attestation.semantic_identity(receipt, context))
         foreign = self.writer.comment(role="dispatcher", actor=self.runtime.owner, reference=CARD_REF,
@@ -510,7 +514,7 @@ class GateReceiptPolicyTests(unittest.TestCase):
 
     def test_exact_sha_passing_receipt_is_typed_and_renderable(self) -> None:
         accepted = AcceptedGreenGate.accept(
-            self.receipt(), current_sha="a" * 40, gate_mode="local", noop=False
+            self.receipt(), current_sha="a" * 40, reviewed_sha="", gate_mode="local", noop=False
         )
 
         self.assertTrue(accepted.policy_valid)
@@ -529,7 +533,7 @@ class GateReceiptPolicyTests(unittest.TestCase):
         ):
             with self.subTest(current_sha=current_sha, gate_mode=gate_mode):
                 accepted = AcceptedGreenGate.accept(
-                    payload, current_sha=current_sha, gate_mode=gate_mode, noop=False
+                    payload, current_sha=current_sha, reviewed_sha="", gate_mode=gate_mode, noop=False
                 )
                 self.assertFalse(accepted.policy_valid)
                 self.assertIsNone(accepted.receipt)
@@ -540,10 +544,10 @@ class GateReceiptPolicyTests(unittest.TestCase):
         for gate_mode, noop in (("none", False), ("local", True)):
             with self.subTest(gate_mode=gate_mode, noop=noop):
                 receiptless = AcceptedGreenGate.accept(
-                    None, current_sha="a" * 40, gate_mode=gate_mode, noop=noop
+                    None, current_sha="a" * 40, reviewed_sha="", gate_mode=gate_mode, noop=noop
                 )
                 forged = AcceptedGreenGate.accept(
-                    candidate, current_sha="a" * 40, gate_mode=gate_mode, noop=noop
+                    candidate, current_sha="a" * 40, reviewed_sha="", gate_mode=gate_mode, noop=noop
                 )
                 self.assertTrue(receiptless.policy_valid)
                 self.assertIsNone(receiptless.receipt)
@@ -551,7 +555,7 @@ class GateReceiptPolicyTests(unittest.TestCase):
 
     def test_unknown_mode_is_invalid_even_when_receiptless_or_noop(self) -> None:
         for noop in (False, True):
-            accepted = AcceptedGreenGate.accept(None, current_sha="a" * 40, gate_mode="alternate", noop=noop)
+            accepted = AcceptedGreenGate.accept(None, current_sha="a" * 40, reviewed_sha="", gate_mode="alternate", noop=noop)
             self.assertFalse(accepted.policy_valid)
 
     def test_only_full_sha1_or_sha256_object_ids_are_receipts(self) -> None:

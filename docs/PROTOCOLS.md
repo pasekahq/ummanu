@@ -1021,19 +1021,31 @@ Every real mechanical gate result produces a receipt bound to one checkout with 
 `command_or_check_set_digest` (local gate: the configured command's digest; GitHub: a stable
 required-check-set identity, not a workflow or run digest). Both object IDs are full 40-character
 SHA-1 or 64-character SHA-256; abbreviations are not evidence. A local gate captures HEAD before and
-after its command and fails closed if the command moves it. Only `local` and `github` carry
-receipts; `none` and noop are valid only without one; an unknown mode is never accepted.
+after its command and fails closed if the command moves it. A green gate's evidence is exactly one
+of three classes (`dispatch/gate_receipt.py`): an AttestedReceipt, which only `local` and `github`
+carry; PolicyReceiptless, for `none` and noop without a receipt and only at the reviewed SHA; and
+InvalidAttestation for anything else, including an unknown mode. InvalidAttestation is never a pass.
 
 The dispatcher persists the receipt with the active card, renders it into the reviewer's task
 document, replaces it with the fresh post-review receipt in the Assessment delivery, and writes the
 fresh final receipt into the release audit after the mandatory exact-SHA pre-merge re-check.
 
-The review remains valid across a gate refresh-merge only when the reviewed commit is an ancestor of
-HEAD, every intervening commit outside `origin/<base>` is a merge commit, and every path changed
-from `merge-base(reviewed commit, origin/<base>)` to the reviewed commit is byte-for-byte unchanged
-at HEAD. The release audit records the reviewed SHA, HEAD, base SHA, reviewed path count and that
-the reviewed paths are unchanged. An unreadable git answer or any failed condition keeps the drift
-refusal. The existing instance publication recovery remains a separate exception.
+After review, `release_lifecycle.review_outcome` reads the reviewed SHA, HEAD and `origin/<base>`
+again before every Assessment park, release attestation and merge, and ends in one of three
+outcomes; a saved earlier outcome authorises nothing:
+
+- `unchanged`: HEAD is the reviewed SHA.
+- `reconciled`: the reviewed commit is an ancestor of HEAD, every intervening commit outside
+  `origin/<base>` is a merge commit, every path changed from `merge-base(reviewed commit,
+  origin/<base>)` to the reviewed commit is byte-for-byte unchanged at HEAD, and HEAD carries an
+  AttestedReceipt. A later base move is judged again from the reviewed SHA and needs a receipt on
+  its own HEAD. The release audit names the outcome, the reviewed SHA, HEAD, base SHA and reviewed
+  path count.
+- `rework`: anything else, including InvalidAttestation and an unreadable git answer. The outcome
+  and the three SHAs go into the reason: at Validate the card returns to the worker, at the release
+  it is Blocked, and either way the next verdict comes from a fresh review.
+
+The existing instance publication recovery remains a separate exception.
 
 The reviewer document is written outside the checkout, under the installation-private run artifacts; the
 head receives only a bounded pointer. `TASK.md` is a generated, git-ignored workspace handoff packet.

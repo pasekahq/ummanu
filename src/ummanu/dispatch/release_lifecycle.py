@@ -25,7 +25,8 @@ from ummanu.board.completion_evidence import (
 from ummanu.board.terminal_taxonomy import BlockedReason
 from ummanu.dispatch import attempt_accounting, e2e_stage, post_merge, release_activation
 from ummanu.dispatch.decision_pointer import decision_pointer
-from ummanu.dispatch.gate import GateResult
+from ummanu.dispatch.gate import GateResult, validation_ci
+from ummanu.dispatch.gate_receipt import AcceptedGreenGate, InvalidAttestation, ReviewOutcome
 from ummanu.dispatch.helpers import scrub_host_output
 from ummanu.dispatch.production_checkout import ProductionActivationRefused
 from ummanu.dispatch.state import DispatcherRecord, attempt_request_id as _attempt_request_id
@@ -45,28 +46,48 @@ def released_verdict(task: dict[str, Any], record: DispatcherRecord) -> str:
     return "missing" if not review_required(task) or record.worker_continuation.verdict_outcome == "missing" else "green"
 
 
-def review_drift(runtime: Any, task: dict[str, Any], record: DispatcherRecord) -> str:
-    """Has the checkout moved off the commit the reviewer was pointed at? A verdict describes one code
-    state; merging a different one lands work nobody reviewed. Returns the operator message for the
-    bounce, or "" when the states match, or when neither can be read — an unreadable workspace is
-    the gate's failure to report, not a silent bounce.
+def review_outcome(
+    runtime: Any, task: dict[str, Any], record: DispatcherRecord, attestation: object
+) -> ReviewOutcome | None:
+    """The post-review outcome from the reviewed SHA, HEAD and `origin/<base>` read now.
+
+    None before any review pinned a commit. `attestation` is the green gate evidence for HEAD.
     """
-    record.review_reconciliation = None
-    if not record.review_commit:
-        return ""
-    current = runtime.host.head_commit(record)
-    if not current or current == record.review_commit:
-        return ""
-    reconciliation = runtime.host.reconcile_reviewed_base_move(
-        task, record, record.review_commit, current
+    reviewed = record.review_commit
+    if not reviewed:
+        return None
+    host = runtime.host
+    head = host.head_commit(record)
+    if head == reviewed:
+        return ReviewOutcome("unchanged", reviewed, head, "", 0, "")
+    base = host.base_commit(task, record)
+
+    def rework(cause: str) -> ReviewOutcome:
+        return ReviewOutcome("rework", reviewed, head, base, 0, cause)
+
+    if not head:
+        return rework("HEAD is unreadable")
+    gate = AcceptedGreenGate.accept(
+        attestation, current_sha=head, reviewed_sha=reviewed,
+        gate_mode=validation_ci(host, task), noop=host.mode == "noop",
     )
-    if reconciliation is not None:
-        record.review_reconciliation = reconciliation
-        return ""
+    if isinstance(gate.evidence, InvalidAttestation):
+        return rework(f"InvalidAttestation: {gate.evidence.reason}")
+    facts = host.reconcile_reviewed_base_move(task, record, reviewed, head)
+    if facts is None:
+        return rework(
+            "the commits since the reviewed SHA are not base-only over unchanged candidate paths, "
+            "or git could not answer"
+        )
+    return ReviewOutcome("reconciled", reviewed, head, str(facts["base_sha"]), int(facts["reviewed_paths"]), "")
+
+
+def rework_reason(outcome: ReviewOutcome) -> str:
     return (
-        f"The review was given for commit `{record.review_commit[:12]}` while the working copy "
-        f"is now on `{current[:12]}`: the verdict describes a different state of the code. The "
-        f"card is back in In progress; rework it and report again."
+        f"The review was given for commit `{outcome.reviewed_sha[:12]}` while the working copy is "
+        f"now on `{outcome.head_sha[:12] or 'an unreadable HEAD'}`: the verdict describes a "
+        f"different state of the code ({outcome.facts()}). The verdict is not reused: the card "
+        "needs rework and a fresh review."
     )
 
 
@@ -77,12 +98,10 @@ def merge_readiness(
 
     Returns one of "drift", "transport", "failed", "pending", "red" or "green". Both sides of the
     seam ask it: Validate before parking a green verdict, and the release again immediately before
-    the merge. "transport" is deliberately not "failed" — a backend that could not be reached says
-    nothing about the checkout, so the caller retries rather than deciding the card on silence.
+    the merge. "drift" is the post-review outcome `rework`, read after the gate's base refresh.
+    "transport" is deliberately not "failed": a backend that could not be reached says nothing
+    about the checkout, so the caller retries rather than deciding the card on silence.
     """
-    drift = review_drift(runtime, task, record)
-    if drift:
-        return "drift", None, drift
     try:
         result = runtime.host.gate_check(task, record)
     except GateTransportError as exc:
@@ -90,10 +109,9 @@ def merge_readiness(
     except HostError as exc:
         return "failed", None, scrub_host_output(str(exc))
     if result.status == "green":
-        # The gate may have refresh-merged the base after the first identity check.
-        drift = review_drift(runtime, task, record)
-        if drift:
-            return "drift", None, drift
+        outcome = review_outcome(runtime, task, record, result.attestation)
+        if outcome is not None and outcome.kind == "rework":
+            return "drift", None, rework_reason(outcome)
         return "green", result, ""
     if result.status == "pending":
         return "pending", result, ""
@@ -341,6 +359,11 @@ def release_parked(
         result, reconciliation = e2e.result, e2e.reconciliation
     assert result is not None
     with tick_stage("release_gate"):
+        post_review = review_outcome(runtime, task, record, result.attestation)
+        if post_review is not None and post_review.kind == "rework":
+            return _block_release_drift(
+                runtime, task, record, records, payload, attempt_id, rework_reason(post_review)
+            )
         blocked = gate_lifecycle.accept_green_gate(
             runtime,
             task,
@@ -350,6 +373,7 @@ def release_parked(
             attempt_id,
             result,
             stage="release",
+            review_outcome=post_review,
             e2e_reconciliation=reconciliation,
         )
     if blocked is not None:
@@ -433,18 +457,20 @@ def read_release_gate(
             step="assessment",
             action="merge-gate-pending",
         ), None
+    if kind == "drift":
+        return _block_release_drift(runtime, task, record, records, payload, attempt_id, detail), None
     if kind != "green":
-        summary = {
-            "drift": f"the release cannot land: {detail}",
-            "failed": f"the merge gate could not be read: {detail}",
-        }.get(kind, "the mechanical gate is no longer green for the checkout this release was decided on")
+        summary = (
+            f"the merge gate could not be read: {detail}" if kind == "failed"
+            else "the mechanical gate is no longer green for the checkout this release was decided on"
+        )
         return block_merge_path(runtime,
             task,
             record,
             records,
             payload,
             attempt_id,
-            blocked_reason="implementation" if kind == "drift" else "gate",
+            blocked_reason="gate",
             action=f"release-{kind}-blocked",
             reason=f"Observer decision: accept. {summary}",
             step="assessment",
@@ -464,6 +490,30 @@ def read_release_gate(
             outcome="merge gate result unavailable",
         ), None
     return None, result
+
+
+def _block_release_drift(
+    runtime: Any,
+    task: dict[str, Any],
+    record: DispatcherRecord,
+    records: dict[str, DispatcherRecord],
+    payload: dict[str, Any],
+    attempt_id: str,
+    detail: str,
+) -> dict[str, Any]:
+    """Outcome `rework` at the release seam: no rework round is open there, so the card is Blocked."""
+    return block_merge_path(runtime,
+        task,
+        record,
+        records,
+        payload,
+        attempt_id,
+        blocked_reason="implementation",
+        action="release-drift-blocked",
+        reason=f"Observer decision: accept. the release cannot land: {detail}",
+        step="assessment",
+        outcome="release drift",
+    )
 
 
 def release_effect(
@@ -509,6 +559,12 @@ def release_effect(
             reason="post-merge watch release identity does not match this candidate round; old merge cannot authorize release",
             step=step, outcome="post-merge watch release identity mismatch",
         )
+    if has_candidate(task) and watch is None:
+        post_review = review_outcome(runtime, task, record, record.gate_attestation.to_json())
+        if post_review is not None and post_review.kind == "rework":
+            return _block_release_drift(
+                runtime, task, record, records, payload, attempt_id, rework_reason(post_review)
+            )
     if has_candidate(task):
         try:
             # Its runtime fence, delivery, refresh and landed-commit read are each their own stage.

@@ -21,7 +21,7 @@ from ummanu.dispatch.gate import (
     reset_infrastructure_reruns as _reset_infrastructure_reruns,
     validation_ci as _validation_ci,
 )
-from ummanu.dispatch.gate_receipt import AcceptedGreenGate
+from ummanu.dispatch.gate_receipt import AcceptedGreenGate, InvalidAttestation, ReviewOutcome
 from ummanu.dispatch.gate_types import _fingerprint as _gate_fingerprint
 from ummanu.dispatch.head_vitality import status_has_vitality_observation
 from ummanu.dispatch.head_vitality_episode import VitalityVerdict
@@ -49,9 +49,10 @@ from ummanu.kernel.errors import TaskError
 def current_green_gate(runtime: Any, task: dict[str, Any], record: DispatcherRecord) -> AcceptedGreenGate:
     """Accept the saved gate only under the current checkout and declared gate policy."""
     if record.gate_state != "green":
-        return AcceptedGreenGate(None, False)
+        return AcceptedGreenGate(InvalidAttestation("no green gate is recorded"))
     return AcceptedGreenGate.accept(
         record.gate_attestation.to_json(), current_sha=runtime.host.head_commit(record),
+        reviewed_sha=record.review_commit,
         gate_mode=_validation_ci(runtime.host, task), noop=runtime.host.mode == "noop",
     )
 
@@ -123,7 +124,7 @@ def run_gate(
     gate_answered(runtime, ref, record, records, payload)
     if result.status == "green":
         return accept_green_gate(runtime, 
-            task, record, records, payload, attempt_id, result, stage="initial"
+            task, record, records, payload, attempt_id, result, stage="initial", review_outcome=None
         )
     if result.status == "pending":
         return gate_pending(runtime, task, record, records, payload, attempt_id, result)
@@ -140,17 +141,20 @@ def accept_green_gate(
     result: GateResult,
     *,
     stage: str,
+    review_outcome: ReviewOutcome | None,
     e2e_reconciliation: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Validate and persist every green gate through one exact-SHA policy boundary.
 
-    `e2e_reconciliation` is the base-only move that carries a green e2e run from the SHA it ran on
-    to this one (`dispatch/e2e_stage.py`); the attestation records it beside the review's.
+    `review_outcome` is the caller's fresh post-review outcome, never `rework`, and None before
+    review. `e2e_reconciliation` is the base-only move that carries a green e2e run from the SHA it
+    ran on to this one (`dispatch/e2e_stage.py`); the attestation records it beside the review's.
     """
     ref = task["ref"]
     accepted = AcceptedGreenGate.accept(
         result.attestation,
         current_sha=runtime.host.head_commit(record),
+        reviewed_sha=review_outcome.reviewed_sha if review_outcome is not None else "",
         gate_mode=_validation_ci(runtime.host, task),
         noop=getattr(runtime.host, "mode", "real") == "noop",
     )
@@ -179,7 +183,7 @@ def accept_green_gate(
     if accepted.receipt is not None and stage in {"assessment", "release"}:
         context = gate_attestation.delivery_context(
             record, ref=ref, owner=runtime.owner, attempt_id=attempt_id, stage=stage,
-            e2e_reconciliation=e2e_reconciliation,
+            review_outcome=review_outcome, e2e_reconciliation=e2e_reconciliation,
         )
         try:
             identity, effect = gate_attestation.select_effect(
