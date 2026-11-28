@@ -1,6 +1,6 @@
 ---
 name: observe-sprint
-description: "Run an open sprint as the observer head the dispatcher launched: recover semantic state from the sprint entity and board, cut one card at a time, classify Assessment and Blocked evidence, and write concise semantic resumes. The dispatcher owns waiting and wakes this head only when a decision is needed. This is the observer role's skill, not the interactive ummanu's."
+description: "Run an open sprint as the observer head the dispatcher launched: recover semantic state from the sprint entity and board, cut cards, at most two independent code cards at once, classify Assessment and Blocked evidence, and write concise semantic resumes. The dispatcher owns waiting and wakes this head only when a decision is needed. This is the observer role's skill, not the interactive ummanu's."
 ---
 
 # Observe Sprint
@@ -127,7 +127,7 @@ prove it; the dispatcher owns redelivery.
   "selected_step": "what you are doing now",
   "selected_why": "why this specifically",
   "rejected_alternatives": "each deliberately skipped path: <limit>, <when to upgrade>",
-  "current_task": "the ref of the current card, or an explicit 'no active card'",
+  "current_task": "the refs of the active cards, or an explicit 'no active card'",
   "dod_state": "which DoD items are closed and by what evidence, and which are not",
   "next_safe_step": "what to do next if the session is cut off right now"
 }
@@ -145,8 +145,9 @@ Always first, on launch and after a restart:
    its cards (states, reports, verdicts, gate receipts).
 2. Where the resume and the board disagree, the board is right; record a correction only if it changes
    the next decision.
-3. With an active card (current task, or one in Ready, In progress, Validate or Assessment), cut no
-   second one.
+3. Count the active `code`, `research` and `infra` cards (current task, or one in Ready, In progress,
+   Validate or Assessment). With two, cut no third; with one, cut a second only under the lane rule of
+   section 5.
 4. If the sprint is closed or stopped, start nothing.
 5. If `dod.structured` is true and an item has no weight, weigh every item before the first card,
    comparing them with each other by expected difficulty (not value), one call per item:
@@ -211,10 +212,24 @@ Research yourself (code, docs, logs, audit, pull requests, the live system), wit
 record conclusions in a resume and return to step 3. Only a durable artifact needed in a repository is a
 `research` card.
 
-## 5. Cut exactly one card
+## 5. Cut a card, at most two code cards at once
 
-One substantive card executes at a time; the next only after the previous one is fully analysed. Before
-a `code` card, take the first route that works and record it in the card or resume:
+At most two `code` cards are active at once; a `research` or `infra` card counts as one of them, and
+`decision`, `operation` and `wait` cards keep their own rules. A second card is allowed only when all
+of these hold:
+
+- it serves a different DoD item from the first;
+- the two touch disjoint subsystems and files, as named in both specs;
+- neither has `blocked_by` on the other;
+- the project's `policy.code_concurrency` in `ummanu status` admits two (each project admits one more
+  when the cards are in different projects).
+
+Otherwise work stays sequential: the next card only after the previous one is fully analysed, and a
+card that needs another's result is cut with `--blocked-by <ref>`. Each card is still analysed on its
+own at Assessment; a red or Blocked card does not stop deciding the other. Point `sprint current-task`
+at the card cut last.
+
+Before a `code` card, take the first route that works and record it in the card or resume:
 
 1. Delete an unnecessary path, behavior or layer, if that advances the sprint and loses no supported
    invariant.
@@ -242,13 +257,14 @@ checkable Acceptance criteria, Out of scope. Work that pulls changes beyond its 
 with `--blocked-by`. CI, the pull request and the exact-SHA gate are machinery-owned: a CI item of the
 DoD stays a sprint-close condition and never becomes a card's Acceptance criterion.
 Every `code`, `research` and `infra` card carries `--estimate-minutes <N>`, your expected worker time:
-a reference point for the stale-round signal, not a ceiling.
+a reference point for the stale-round signal, not a ceiling. Observed workers finish about 3 times
+faster than observers set this estimate; divide your first guess by 3.
 
 A card is one independently mergeable increment; a dark or unwired path is allowed. Size counts
-substantive decisions, not diff lines; the reference points are a worker turn of about 1 h, which
-`--estimate-minutes` records, and at most two review rounds. Cut along the seams when a spec has more
-than about 5 AC, touches more than two subsystems or layers, or combines any two of: a contract or
-persistence change, a new executor, a new CI lane. A card that cannot be cut says why in its spec.
+substantive decisions, not diff lines; the reference points are about 1 h of real head work and at
+most two review rounds. Never split an item into smaller cards to fill a second lane. Cut along the
+seams when a spec has more than about 5 AC, touches more than two subsystems or layers, or combines any
+two of: a contract or persistence change, a new executor, a new CI lane. A card that cannot be cut says why in its spec.
 Example: a feature that pins a kit, adds a typed task with a migration and API, changes planning,
 exempts the task from paid admission, runs it in a new executor with a PR/CI handoff and ships a new
 CI lane becomes five cards, each mergeable alone: (a) pin the kit and regenerate derivatives; (b) the
@@ -280,10 +296,10 @@ and the review choice); skip review on code only for a fully mechanical trivial 
 
 ## 6. Decide at Assessment
 
-After cutting a card, end the turn. Every substantive verdict, green or red, parks the card in Assessment
-until you decide; everything mechanical (CI, the stand) has passed, only direction is left. No worker
-picks up a red verdict alone; a card back in In progress without you is a failed mechanical gate. Record
-the decision with a reason; the dispatcher performs it:
+After cutting a card, or two under section 5, end the turn. Every substantive verdict, green or red,
+parks the card in Assessment until you decide; everything mechanical (CI, the stand) has passed, only
+direction is left. No worker picks up a red verdict alone; a card back in In progress without you is a
+failed mechanical gate. Record the decision with a reason; the dispatcher performs it:
 
 ```bash
 python3 -P -m ummanu task decide --role observer --actor observer --ref <card-ref> \
