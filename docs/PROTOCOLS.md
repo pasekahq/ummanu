@@ -2613,6 +2613,23 @@ observer and skips new linked claims; active cards continue their cycle. Only
 This budget counts restarts. The e2e run budget, which counts paid e2e runs, is separate:
 [The e2e run budget](#the-e2e-run-budget).
 
+### Observer card lanes
+
+An observer keeps at most two `code` cards of its sprint active at once (Ready, In progress, Validate or
+Assessment); a `research` or `infra` card counts as one of them, and `decision`, `operation` and `wait`
+cards keep their own rules. A second card is allowed only when all of these hold:
+
+- it serves a different DoD item from the first;
+- the two touch disjoint subsystems and files, as named in both specs;
+- neither has `blocked_by` on the other;
+- the project's `policy.code_concurrency` admits two (each project admits one more when the cards are
+  in different projects).
+
+Otherwise work stays sequential, and a card that needs another's result is cut with `--blocked-by
+<ref>`. Each card is still analysed on its own at Assessment; a red or Blocked card does not stop
+deciding the other. The rule binds the observer; the dispatcher enforces only its claim capacity, so a
+card beyond `policy.code_concurrency` waits in Ready for a slot.
+
 ### Resume and observer wakes
 
 `sprint resume` accepts JSON with required string fields `selected_step`, `selected_why`,
@@ -2652,8 +2669,9 @@ project), the dispatcher records a post-merge watch in its own
 production state (`post_merge_watches`: card ref, project, integration base, the commit that actually
 landed on the base, attempt id, attempt round, report generation, start time) before the Assessment → Post-merge CI release, which carries a
 `release_merge` marker. The watch survives a restart outside head records. Teardown and the release
-writer clear the round and claim; Post-merge CI takes no worker slot or new round and does not hold
-the sprint's one-card rule. The merge fact counts toward DoD delivery before final Done.
+writer clear the round and claim; Post-merge CI takes no worker slot or new round and is not an active
+card of [Observer card lanes](#observer-card-lanes). The merge fact counts toward DoD delivery before
+final Done.
 
 A release may reuse a landed watch only when its persisted attempt id, attempt round and report
 generation match the releasing record. A missing or different identity blocks the release before
