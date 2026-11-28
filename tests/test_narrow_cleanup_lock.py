@@ -24,6 +24,7 @@ from ummanu.board.host import TransitionRequest
 from ummanu.board.models import Actor, CardState, EntityKind
 from ummanu.board.tick_snapshot import tick_snapshot
 from ummanu.dispatch import assessment_decision, cleanup, production, release_lifecycle
+from ummanu.dispatch.gate import GateResult
 from ummanu.dispatch.host import CommandHostRuntime
 from ummanu.dispatch.runtime import DispatcherRuntime
 from ummanu.dispatch.types import HostError, OwnershipChanged
@@ -544,7 +545,7 @@ class NarrowCleanupLockTests(unittest.TestCase):
                 assessment_decision, "recorded_decision", return_value=("accept", "accept", ())
             ),
             mock.patch.object(release_lifecycle.e2e_stage, "run_stage", return_value=None),
-            mock.patch.object(release_lifecycle, "read_release_gate", return_value=(None, object())),
+            mock.patch.object(release_lifecycle, "read_release_gate", return_value=(None, GateResult("green", "green"))),
             mock.patch("ummanu.dispatch.gate_lifecycle.accept_green_gate", return_value=None),
             mock.patch.object(release_lifecycle, "decision_pointer", return_value="accept"),
             mock.patch.object(release_lifecycle.attempt_accounting, "terminal_effect", side_effect=terminal),
