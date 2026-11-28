@@ -58,7 +58,6 @@ integration-board tests/test_release_schema_boundary.py
 unit tests/test_entrypoint_guard.py
 unit tests/test_closed_product_registry.py
 component tests/test_config_check.py
-component tests/test_local_gate_limit.py
 unit tests/test_env_prefix.py
 unit tests/test_environment_aliases.py
 integration-board tests/test_po_runner.py
@@ -371,6 +370,7 @@ unit tests/test_ci_lint.py
 unit tests/test_check_style.py
 unit tests/test_hermetic_shell.py
 integration-dispatcher tests/test_broad_check_process.py
+integration-dispatcher tests/test_local_gate_limit.py
 unit tests/test_installation_retirement.py
 unit tests/test_cli_cold_composition.py
 unit tests/test_process_receipts.py
