@@ -676,6 +676,8 @@ class FakeHost:
         self.stopped_reviews: list[str] = []
         self.review_stop_initiators: list[str] = []
         self.commit = "c0ffee1234567890"
+        # The `origin/<base>` commit the review outcome reads.
+        self.base = "ba5e000000000000"
         # What the worker checkout says against its base; a test ages it to make a round quiet.
         self.round_workspace_result = WorkspaceReading()
         # The retained checkout a headless recovery binds (secretary-1544): bound and clean on the
@@ -1741,6 +1743,10 @@ class FakeHost:
 
     def round_workspace(self, task: dict, record) -> WorkspaceReading:
         return self.round_workspace_result
+
+    def base_commit(self, task: dict, record) -> str:
+        self.calls.append("base_commit")
+        return self.base
 
     def reconcile_reviewed_base_move(
         self, task: dict, record, reviewed_commit: str, current_commit: str

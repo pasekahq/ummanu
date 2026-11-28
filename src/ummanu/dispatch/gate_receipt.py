@@ -116,23 +116,98 @@ class GateReceipt:
 
 
 @dataclass(frozen=True)
+class AttestedReceipt:
+    """An executed gate's passing exact-SHA receipt for the HEAD being judged."""
+
+    receipt: GateReceipt
+
+
+@dataclass(frozen=True)
+class PolicyReceiptless:
+    """`ci: none` or noop: no check ran, so it admits only the reviewed SHA."""
+
+    policy: str
+
+
+@dataclass(frozen=True)
+class InvalidAttestation:
+    """A green answer without evidence the gate policy accepts; never a pass."""
+
+    reason: str
+
+
+GateEvidence = AttestedReceipt | PolicyReceiptless | InvalidAttestation
+
+
+@dataclass(frozen=True)
 class AcceptedGreenGate:
     """The single policy result used at initial validation, park and release."""
 
-    receipt: GateReceipt | None
-    policy_valid: bool
+    evidence: GateEvidence
+
+    @property
+    def receipt(self) -> GateReceipt | None:
+        return self.evidence.receipt if isinstance(self.evidence, AttestedReceipt) else None
+
+    @property
+    def policy_valid(self) -> bool:
+        return not isinstance(self.evidence, InvalidAttestation)
 
     @classmethod
-    def accept(cls, payload: object, *, current_sha: str, gate_mode: str, noop: bool) -> AcceptedGreenGate:
+    def accept(
+        cls, payload: object, *, current_sha: str, reviewed_sha: str, gate_mode: str, noop: bool
+    ) -> AcceptedGreenGate:
+        """Classify green evidence for `current_sha`; `reviewed_sha` is "" before any review."""
         if gate_mode not in _ALLOWED_MODES:
-            return cls(None, False)
-        receiptless = payload is None or payload == {}
-        if noop or gate_mode == "none":
-            return cls(None, receiptless)
+            return cls(InvalidAttestation(f"unsupported gate mode {gate_mode!r}"))
+        if receiptless_policy(gate_mode, noop=noop):
+            policy = "noop" if noop else "ci none"
+            if payload is not None and payload != {}:
+                return cls(InvalidAttestation(f"a {policy} gate carried a receipt"))
+            if reviewed_sha and current_sha != reviewed_sha:
+                return cls(InvalidAttestation(f"a {policy} gate admits only the reviewed SHA"))
+            return cls(PolicyReceiptless(policy))
         receipt = GateReceipt.accept(payload, current_sha=current_sha)
-        if receipt is not None and receipt.gate_mode != gate_mode:
-            receipt = None
-        return cls(receipt, receipt is not None)
+        if receipt is None or receipt.gate_mode != gate_mode:
+            return cls(InvalidAttestation(f"no valid {gate_mode} exact-SHA receipt for HEAD"))
+        return cls(AttestedReceipt(receipt))
+
+
+def receiptless_policy(gate_mode: str, *, noop: bool) -> bool:
+    return noop or gate_mode == "none"
+
+
+@dataclass(frozen=True)
+class ReviewOutcome:
+    """How a verdict on `reviewed_sha` stands at HEAD: `unchanged`, `reconciled` or `rework`.
+
+    `reconciled` is base-only history over unchanged candidate paths with an AttestedReceipt on HEAD.
+    """
+
+    kind: str
+    reviewed_sha: str
+    head_sha: str
+    base_sha: str
+    reviewed_paths: int
+    cause: str
+
+    def facts(self) -> str:
+        line = (
+            f"post-review outcome `{self.kind}`: reviewed SHA `{self.reviewed_sha}`; "
+            f"HEAD `{self.head_sha or 'unreadable'}`; base SHA `{self.base_sha or 'unreadable'}`"
+        )
+        return f"{line}; {self.cause}" if self.cause else line
+
+    def reconciliation(self) -> dict[str, str | int] | None:
+        """The release attestation's reconciliation facts, present only for `reconciled`."""
+        if self.kind != "reconciled":
+            return None
+        return {
+            "reviewed_sha": self.reviewed_sha,
+            "head_sha": self.head_sha,
+            "base_sha": self.base_sha,
+            "reviewed_paths": self.reviewed_paths,
+        }
 
 
 def mint_gate_receipt(

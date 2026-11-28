@@ -829,8 +829,6 @@ class DispatcherRecord:
     review_handle: str = ""
     review_leaf: str = ""
     review_commit: str = ""
-    # Set by the release identity check for the gate audit in this tick only.
-    review_reconciliation: dict[str, str | int] | None = field(default=None, compare=False)
     # Re-review packet: the accepted predecessor checkout and full verdict body.
     # These survive rework so the next independent reviewer can inspect the delta.
     previous_reviewed_sha: str = ""

@@ -5015,7 +5015,7 @@ class DispatcherRuntimeTests(DispatcherRuntimeFixture, unittest.TestCase):
         visit, _decision = assessment_resolution(self.writer.audit.events("ummanu-510"))
         self.sprints.rows["sprint:1031"]["status"] = status
         self.board.add_sprint("sprint:1031", status=status)
-        gate = AcceptedGreenGate.accept({}, current_sha=self.host.commit, gate_mode="none", noop=False)
+        gate = AcceptedGreenGate.accept({}, current_sha=self.host.commit, reviewed_sha="", gate_mode="none", noop=False)
         launches = self.host.calls.count("prepare_worker"), len(self.host.reviews)
         for lost in (False, True):
             with self.subTest(lost=lost):
@@ -7334,8 +7334,8 @@ class DispatcherRuntimeTests(DispatcherRuntimeFixture, unittest.TestCase):
         self.assertIn("continuation: replacement", comments[-1]["body"])
 
     def test_green_verdict_for_a_descendant_checkout_is_not_merged_by_default(self) -> None:
-        """A descendant can contain new commits after review; a moved checkout finishes only as a
-        reconciled base move, which this one is not."""
+        """A descendant can contain new commits after review; under a receiptless `ci: none` gate a
+        moved checkout is never reconciled, because that policy admits only the reviewed SHA."""
         self.start_dispatcher()
         self._run_worker_to_validate()
         self.tick()
@@ -7355,7 +7355,9 @@ class DispatcherRuntimeTests(DispatcherRuntimeFixture, unittest.TestCase):
         self.assertEqual(bounced["action"], "review-freeze-red-rework")
         self.assertEqual(self.reader.show("ummanu-510")["state"], "in_progress")
         self.assertEqual(self.host.completed, [])
-        self.assertIn("reconcile_reviewed_base_move", self.host.calls)
+        comments = self.reader.show("ummanu-510")["comments"]
+        self.assertTrue(any("InvalidAttestation: a ci none gate admits only the reviewed SHA" in comment["body"]
+                            for comment in comments))
         self.assertEqual(reviewed, "c0ffee1234567890")
 
     def test_green_verdict_for_the_reviewed_checkout_merges_and_tears_down(self) -> None:
@@ -13777,6 +13779,18 @@ def _build_gated_workspace(root: Path, base: str, branch: str) -> Path:
     return ws
 
 
+def _receipt_for(workspace: Path) -> dict[str, object]:
+    """A passing local receipt on the workspace HEAD, so only the git conditions decide."""
+    from ummanu.dispatch.gate_receipt import mint_gate_receipt
+
+    receipt = mint_gate_receipt(
+        validated_sha=git(workspace, "rev-parse", "HEAD"), base_sha="b" * 40, gate_mode="local",
+        required_checks=[{"name": "local", "conclusion": "SUCCESS"}], check_set_identity="true",
+    )
+    assert receipt is not None
+    return receipt
+
+
 class ReviewGateHost(GateHost):
     def gate_check(self, task: dict, record: DispatcherRecord) -> GateResult:
         # Exercise the real git gate without the live-installation provenance preflight.
@@ -13808,6 +13822,7 @@ class ReviewBaseReconciliationTests(unittest.TestCase):
 
         from ummanu.board.audit_contract import require_claim
         from ummanu.dispatch import gate_attestation, release_lifecycle
+        from ummanu.dispatch.gate_receipt import ReviewOutcome
 
         with tempfile.TemporaryDirectory() as tmp:
             workspace, base_writer, _, host, record, task = self._setup(Path(tmp))
@@ -13851,12 +13866,12 @@ class ReviewBaseReconciliationTests(unittest.TestCase):
             self.assertEqual(outcome.get("to"), "done", outcome)
             merge.assert_called_once()
             self.assertNotEqual(head, record.review_commit)
-            self.assertEqual(record.review_reconciliation, {
+            reconciliation = {
                 "reviewed_sha": record.review_commit,
                 "head_sha": head,
                 "base_sha": base,
                 "reviewed_paths": 1,
-            })
+            }
             comment.assert_called_once()
             audit = comment.call_args.kwargs["body"]
             self.assertIn("release audit", audit)
@@ -13864,9 +13879,10 @@ class ReviewBaseReconciliationTests(unittest.TestCase):
                 self.assertIn(evidence, audit)
             receipt = record.gate_attestation.receipt
             assert receipt is not None
+            outcome = ReviewOutcome("reconciled", record.review_commit, head, base, 1, "")
             context = gate_attestation.delivery_context(
                 record, ref=task["ref"], owner=runtime.owner, attempt_id="attempt-1",
-                stage="release", e2e_reconciliation=None,
+                stage="release", review_outcome=outcome, e2e_reconciliation=None,
             )
             legacy_request = gate_attestation.legacy_request(receipt, context)
             committed.assert_any_call(legacy_request)
@@ -13877,7 +13893,7 @@ class ReviewBaseReconciliationTests(unittest.TestCase):
             request_id = gate_attestation.effect_request(context, identity)
             self.assertEqual(comment.call_args.kwargs["request_id"], request_id)
             effect = record.gate_attestation_effects[identity]
-            self.assertEqual(effect["context"]["review_reconciliation"], record.review_reconciliation)
+            self.assertEqual(effect["context"]["review_reconciliation"], reconciliation)
             self.assertEqual(effect["body"], audit)
             events = writer.audit.events(task["ref"])
             self.assertEqual(events[:len(setup_events)], setup_events)
@@ -13932,41 +13948,43 @@ class ReviewBaseReconciliationTests(unittest.TestCase):
             kind, _, detail = merge_readiness(runtime, task, record)
             self.assertEqual(kind, "drift", detail)
             self.assertIn("review was given", detail)
-            self.assertIsNone(record.review_reconciliation)
 
     def test_new_nonmerge_candidate_commit_keeps_drift(self) -> None:
         from types import SimpleNamespace
 
-        from ummanu.dispatch.release_lifecycle import review_drift
+        from ummanu.dispatch.release_lifecycle import review_outcome
 
         with tempfile.TemporaryDirectory() as tmp:
             workspace, _, _, host, record, task = self._setup(Path(tmp))
             _commit_file(workspace, "late.txt", "unreviewed\n", "late change")
-            self.assertIn("review was given", review_drift(SimpleNamespace(host=host), task, record))
-            self.assertIsNone(record.review_reconciliation)
+            outcome = review_outcome(SimpleNamespace(host=host), task, record, _receipt_for(workspace))
+            assert outcome is not None
+            self.assertEqual(outcome.kind, "rework", outcome)
 
     def test_head_outside_reviewed_history_keeps_drift(self) -> None:
         from types import SimpleNamespace
 
-        from ummanu.dispatch.release_lifecycle import review_drift
+        from ummanu.dispatch.release_lifecycle import review_outcome
 
         with tempfile.TemporaryDirectory() as tmp:
             workspace, _, _, host, record, task = self._setup(Path(tmp))
             git(workspace, "checkout", "--quiet", "main")
-            self.assertIn("review was given", review_drift(SimpleNamespace(host=host), task, record))
-            self.assertIsNone(record.review_reconciliation)
+            outcome = review_outcome(SimpleNamespace(host=host), task, record, _receipt_for(workspace))
+            assert outcome is not None
+            self.assertEqual(outcome.kind, "rework", outcome)
 
     def test_unreadable_base_ref_keeps_drift(self) -> None:
         from types import SimpleNamespace
 
-        from ummanu.dispatch.release_lifecycle import review_drift
+        from ummanu.dispatch.release_lifecycle import review_outcome
 
         with tempfile.TemporaryDirectory() as tmp:
             workspace, _, _, host, record, task = self._setup(Path(tmp))
             _commit_file(workspace, "late.txt", "unreviewed\n", "late change")
             git(workspace, "update-ref", "-d", "refs/remotes/origin/main")
-            self.assertIn("review was given", review_drift(SimpleNamespace(host=host), task, record))
-            self.assertIsNone(record.review_reconciliation)
+            outcome = review_outcome(SimpleNamespace(host=host), task, record, _receipt_for(workspace))
+            assert outcome is not None
+            self.assertEqual(outcome.kind, "rework", outcome)
 
 
 class DispatcherGateTests(unittest.TestCase):

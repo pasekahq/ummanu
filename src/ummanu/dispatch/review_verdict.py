@@ -273,7 +273,15 @@ def accept_merge_gate(
     *,
     e2e_reconciliation: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Accept a green merge gate result once, for the park or the release that follows it."""
+    """Accept a green merge gate result once, for the park or the release that follows it.
+
+    The post-review outcome is read again just before that effect; `rework` returns the card to
+    the worker for a fresh review.
+    """
+    outcome = release_lifecycle.review_outcome(runtime, task, record, result.attestation)
+    if outcome is not None and outcome.kind == "rework":
+        return _review_rework(runtime, task, record, records, payload, attempt_id,
+                              release_lifecycle.rework_reason(outcome))
     return _accept_green_gate(
         runtime,
         task,
@@ -283,7 +291,23 @@ def accept_merge_gate(
         attempt_id,
         result,
         stage="assessment" if parks_for_decision(runtime, task) else "release",
+        review_outcome=outcome,
         e2e_reconciliation=e2e_reconciliation,
+    )
+
+
+def _review_rework(
+    runtime: Any,
+    task: dict[str, Any],
+    record: DispatcherRecord,
+    records: dict[str, DispatcherRecord],
+    payload: dict[str, Any],
+    attempt_id: str,
+    detail: str,
+) -> dict[str, Any]:
+    """Outcome `rework` at the Validate seam; the bounce clears the record's gate state itself."""
+    return _gate_red_to_worker(runtime,
+        task, record, records, payload, attempt_id, GateResult("red", detail), phase="review-freeze"
     )
 
 
@@ -321,10 +345,7 @@ def read_merge_gate(
             action="merge-gate-transport-blocked",
         ), None
     if kind == "drift":
-        # The bounce clears the record's gate state itself.
-        return _gate_red_to_worker(runtime, 
-            task, record, records, payload, attempt_id, GateResult("red", detail), phase="review-freeze"
-        ), None
+        return _review_rework(runtime, task, record, records, payload, attempt_id, detail), None
     _gate_answered(runtime, ref, record, records, payload)
     if kind == "failed":
         return release_lifecycle.block_merge_path(runtime,

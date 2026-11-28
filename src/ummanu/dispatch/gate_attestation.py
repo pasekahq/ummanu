@@ -13,7 +13,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from ummanu.dispatch.gate_receipt import GateReceipt, is_exact_sha
+from ummanu.dispatch.gate_receipt import GateReceipt, ReviewOutcome, is_exact_sha
 from ummanu.dispatch.state import DispatcherRecord, attempt_request_id
 from ummanu.kernel.errors import TaskError
 
@@ -26,7 +26,7 @@ def digest(value: str) -> str:
 
 def delivery_context(
     record: DispatcherRecord, *, ref: str, owner: str, attempt_id: str, stage: str,
-    e2e_reconciliation: dict[str, Any] | None,
+    review_outcome: ReviewOutcome | None, e2e_reconciliation: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return copy.deepcopy({
         "ref": ref, "actor": owner, "attempt_id": record.attempt_id or attempt_id,
@@ -34,7 +34,7 @@ def delivery_context(
         "comment_baseline": record.comment_baseline,
         "report_generation": record.report_generation or record.review_baseline,
         "review_commit": record.review_commit,
-        "review_reconciliation": record.review_reconciliation,
+        "review_reconciliation": review_outcome.reconciliation() if review_outcome is not None else None,
         "e2e_reconciliation": e2e_reconciliation,
     })
 
@@ -53,7 +53,7 @@ def render_body(receipt: GateReceipt, context: dict[str, Any]) -> str:
     review = context["review_reconciliation"]
     if stage == "release" and review is not None:
         body += (
-            "\n\nReview/base reconciliation: "
+            "\n\nReview/base reconciliation: post-review outcome `reconciled`; "
             f"reviewed SHA `{review['reviewed_sha']}`; HEAD `{review['head_sha']}`; "
             f"base SHA `{review['base_sha']}`; {review['reviewed_paths']} reviewed paths; "
             "reviewed paths unchanged."
@@ -151,7 +151,7 @@ def _legacy_context(body: str, context: dict[str, Any]) -> dict[str, Any] | None
         original["review_reconciliation"] = None
     patterns = {
         "review_reconciliation": (
-            r"Review/base reconciliation: reviewed SHA `([^`]+)`; HEAD `([^`]+)`; "
+            r"Review/base reconciliation: post-review outcome `reconciled`; reviewed SHA `([^`]+)`; HEAD `([^`]+)`; "
             r"base SHA `([^`]+)`; ([0-9]+) reviewed paths; reviewed paths unchanged\."
         ),
         "e2e_reconciliation": (
