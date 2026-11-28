@@ -504,7 +504,8 @@ runner's membership checks, fixture environment, marker families or budgets. Ref
 feedback; it introduces no review/CI classification, retry or restart-budget handling.
 
 The dispatcher's local gate (`validation.ci: local`) runs `validation.command` with `bash -lc` in the
-candidate workspace, without a wrapper ancestor, so a command that starts pytest or unittest itself
+candidate workspace, bounded by `validation.timeout_seconds` and serialized with other heavy local
+checks ([PROTOCOLS.md](PROTOCOLS.md#rejected-shas-and-gate-infrastructure-reruns)), without a wrapper ancestor, so a command that starts pytest or unittest itself
 (`.venv/bin/pytest`, `python -m pytest`, `python -m unittest`) is refused with 125 and the card goes
 red on its first gate. Such a gate must go through the receipt wrapper. The dispatcher unit's `PATH`
 has no virtualenv, so spell the wrapper by path:

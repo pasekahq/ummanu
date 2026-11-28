@@ -7,7 +7,9 @@ commands retain the adapter's full-profile argv; a selector runs without a broad
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -25,7 +27,7 @@ from ummanu.broad_check import (
     usable_receipt,
 )
 from ummanu.cli_output import print_error
-from ummanu.config import ConfigError, _load_bindings, load_config
+from ummanu.config import ConfigError, DataDirError, _load_bindings, instance_data_dir, load_config
 from ummanu.projects.contract import (
     ContractUnusable,
     ModuleContract,
@@ -33,8 +35,9 @@ from ummanu.projects.contract import (
 )
 from ummanu.projects.local_check import LocalProfile, PytestSelection
 from ummanu.runtime.cli_composition import add_command_parser
+from ummanu.runtime.heavy_check import Slot, host_slot, slot_path
 from ummanu.runtime.launch_prefix import pythonpath_prefix
-from ummanu.runtime.paths import add_instance_argument
+from ummanu.runtime.paths import add_instance_argument, instance_file
 from ummanu.runtime.role_env import WORKSPACE_ENV_DIR
 from ummanu.runtime.test_guard import check_refusal
 
@@ -128,12 +131,19 @@ class ResolvedCheck:
     """The executable check and the contract selection the caller should be able to see."""
 
     def __init__(
-        self, spec: CheckSpec, module_contract: dict[str, str] | None = None, selector: str = ""
+        self,
+        spec: CheckSpec,
+        module_contract: dict[str, str] | None = None,
+        selector: str = "",
+        *,
+        registered: bool = False,
     ) -> None:
         self.pytest_marker: str | None = None
         self.spec = spec
         self.module_contract = module_contract
         self.selector = selector
+        # A registered project's adapter declared this check, rather than the CLI default.
+        self.registered = registered
 
 
 def add_check_subcommands(subparsers) -> None:
@@ -307,6 +317,7 @@ def _spec(args: argparse.Namespace, *, contract: ModuleContract | None = None) -
         ),
         contract.as_dict(),
         selector,
+        registered=not contract.reason,
     )
     if pytest_selection is not None:
         resolved.pytest_marker = pytest_selection.marker()
@@ -456,12 +467,14 @@ def run_check_broad(args: argparse.Namespace) -> int:
                 return lookup.authorized_result().shell_status
         # The check's combined output goes to stderr so it stays visible live while stdout keeps
         # carrying exactly one JSON document, as every other command here does.
-        _exit_code, receipt = run_broad_check(
-            spec,
-            root=root,
-            stream=sys.stderr,
-            timeout_seconds=args.timeout_seconds or None,
-        )
+        with _host_slot(args, resolved) as slot:
+            _exit_code, receipt = run_broad_check(
+                spec,
+                root=root,
+                stream=sys.stderr,
+                env={**os.environ, **slot.env},
+                timeout_seconds=args.timeout_seconds or None,
+            )
     except BroadCheckError as exc:
         return _fail(exc)
     result = recorded_result(receipt)
@@ -486,6 +499,26 @@ def run_check_broad(args: argparse.Namespace) -> int:
         payload["module_contract"] = resolved.module_contract
     print(json.dumps(payload, sort_keys=True, indent=2))
     return result.shell_status
+
+
+def _host_slot(args: argparse.Namespace, resolved: ResolvedCheck) -> contextlib.AbstractContextManager[Slot]:
+    """The installation's heavy-check slot for a registered project's full profile.
+
+    A checkout no installation registers, or an instance without `instance.yaml`, shares no host
+    with the dispatcher and runs without the slot.
+    """
+    instance = Path(args.instance)
+    if not resolved.registered or not instance_file(instance).is_file():
+        return contextlib.nullcontext(Slot(True))
+    try:
+        path = slot_path(instance_data_dir(instance))
+    except DataDirError as exc:
+        raise BroadCheckError("instance_data_dir", str(exc)) from None
+
+    def announce(holder: str) -> None:
+        print(f"ummanu check broad: waiting for the host's heavy-check slot, held by {holder}", file=sys.stderr)
+
+    return host_slot(path, f"ummanu check broad in {Path(args.root).resolve()}", on_busy=announce)
 
 
 def _run_subset(args: argparse.Namespace, resolved: ResolvedCheck) -> int:

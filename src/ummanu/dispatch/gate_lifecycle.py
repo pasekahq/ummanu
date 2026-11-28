@@ -17,6 +17,7 @@ from ummanu.dispatch.gate import (
     GATE_INFRASTRUCTURE_RERUN_MAX_ATTEMPTS,
     GATE_PENDING_STALL_SECONDS,
     GATE_TRANSPORT_MAX_ATTEMPTS,
+    LOCAL_GATE_DEFERRED,
     GateResult,
     reset_infrastructure_reruns as _reset_infrastructure_reruns,
     validation_ci as _validation_ci,
@@ -410,10 +411,12 @@ def _retry_infrastructure_gate(
 
     The worker has already reported done and is retained at this point.  Moving back to In
     progress would manufacture a round with no code action, and its ``gate-red`` request id
-    would charge the sprint.  No board move here means neither happens.
+    would charge the sprint.  No board move here means neither happens.  A local gate reruns
+    by running again on a later tick.
     """
     ref = task["ref"]
     sha = runtime.host.head_commit(record)
+    local = _validation_ci(runtime.host, task) == "local"
     if record.gate_infrastructure_reruns_sha != sha:
         _reset_infrastructure_reruns(record)
         record.gate_infrastructure_reruns_sha = sha
@@ -427,9 +430,11 @@ def _retry_infrastructure_gate(
             attempt_id,
             result,
             phase=phase,
+            local=local,
         )
     try:
-        runtime.host.rerun_failed_ci(task, record, result)
+        if not local:
+            runtime.host.rerun_failed_ci(task, record, result)
     except GateTransportError as exc:
         retry = _gate_rerun_transport_retry(runtime, 
             task,
@@ -484,11 +489,16 @@ def _retry_infrastructure_gate(
     detail = scrub_host_output(result.summary)
     log = scrub_host_output(result.log).strip()
     fingerprint = result.fingerprint or _gate_fingerprint("infrastructure", log or detail)
+    if local:
+        rerun = f"The local gate runs again on a later tick ({record.gate_infrastructure_reruns}/"
+    else:
+        rerun = (
+            f"Actions run {result.failed_run_id or 'unavailable'} was rerun ({record.gate_infrastructure_reruns}/"
+        )
     body = (
         "The mechanical validation gate is red from an infrastructure failure "
         f"({result.failure_reason or 'enumerated CI-service signature'}): {detail}. "
-        f"Actions run {result.failed_run_id or 'unavailable'} was rerun ({record.gate_infrastructure_reruns}/"
-        f"{GATE_INFRASTRUCTURE_RERUN_MAX_ATTEMPTS}) and the exact SHA stays in Validate until its "
+        f"{rerun}{GATE_INFRASTRUCTURE_RERUN_MAX_ATTEMPTS}) and the exact SHA stays in Validate until its "
         "new terminal result; no worker rework round or red_ci budget event was opened."
     )
     if log:
@@ -533,13 +543,15 @@ def _block_infrastructure_reruns_exhausted(
     result: GateResult,
     *,
     phase: str,
+    local: bool,
 ) -> dict[str, Any]:
     ref = task["ref"]
     runtime.host.stop(record)
+    reruns = "local gate rerun(s)" if local else "Actions rerun(s)"
     reason = (
         "Mechanical gate remains red from infrastructure failure "
         f"({result.failure_reason or 'enumerated CI-service signature'}) after "
-        f"{record.gate_infrastructure_reruns} Actions rerun(s) for HEAD "
+        f"{record.gate_infrastructure_reruns} {reruns} for HEAD "
         f"{record.gate_infrastructure_reruns_sha or runtime.host.head_commit(record)}; "
         "the bounded automatic recovery is exhausted."
     )
@@ -556,9 +568,9 @@ def _block_infrastructure_reruns_exhausted(
         ),
         terminal_state="blocked",
         disposition="blocked",
-        # The failed gate is the terminal cause.  Its original runner
-        # outage explains the bounded reruns, not this Blocked effect.
-        blocked_reason="gate",
+        # A failed Actions run is the terminal cause and its runner outage explains only the
+        # reruns.  A local gate that kept timing out on a worker-green tree judged no code.
+        blocked_reason="infrastructure" if local else "gate",
     )
     records.pop(ref, None)
     runtime.save_records(payload, records)
@@ -786,16 +798,14 @@ def gate_pending(
     """
     ref = task["ref"]
     now = time.time()
+    waiting = {"status": "ok", "step": step, "pilot_ref": ref, "attempt_id": attempt_id, "action": action}
+    if result.failure_reason == LOCAL_GATE_DEFERRED:
+        _comment_gate_deferred(runtime, task, record, attempt_id, step)
+        waiting["reason"] = scrub_host_output(result.summary)
     if not record.gate_pending_since:
         record.gate_pending_since = now
         runtime.save_records(payload, records)
-        return {
-            "status": "ok",
-            "step": step,
-            "pilot_ref": ref,
-            "attempt_id": attempt_id,
-            "action": action,
-        }
+        return waiting
     # The worker head's vitality, observed and acted on exactly as the report wait does.
     # A reduction failure or an unobservable head degrades to None here, which leaves
     # this method on its ordinary path: the gate ceiling remains the outer bound for a
@@ -839,13 +849,7 @@ def gate_pending(
             if outcome is not None:
                 return outcome
     if now - record.gate_pending_since <= GATE_PENDING_STALL_SECONDS:
-        return {
-            "status": "ok",
-            "step": step,
-            "pilot_ref": ref,
-            "attempt_id": attempt_id,
-            "action": action,
-        }
+        return waiting
     runtime.host.stop(record)
     attempt_accounting.terminal_effect(runtime, 
         task,
@@ -864,6 +868,25 @@ def gate_pending(
     records.pop(ref, None)
     runtime.save_records(payload, records)
     return {"status": "ok", "step": step, "pilot_ref": ref, "attempt_id": attempt_id, "to": "blocked"}
+
+
+def _comment_gate_deferred(
+    runtime: Any, task: dict[str, Any], record: DispatcherRecord, attempt_id: str, step: str
+) -> None:
+    """Say once per step and SHA that the local gate waits for the host's heavy-check slot."""
+    ref = task["ref"]
+    sha = runtime.host.head_commit(record)
+    runtime.writer.comment(
+        role="dispatcher",
+        actor=runtime.owner,
+        reference=ref,
+        body=(
+            f"The local mechanical gate for HEAD {sha} is deferred: another heavy local check holds "
+            "the host's heavy-check slot. The card keeps its column and the gate runs once the slot "
+            "is free; the wait is not a failure and does not count against the gate's time limit."
+        ),
+        request_id=_attempt_request_id(record.attempt_id or attempt_id, f"{step}-gate-deferred", ref, sha),
+    )
 
 
 def _worker_vitality_for_gate(

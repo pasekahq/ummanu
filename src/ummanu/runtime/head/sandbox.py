@@ -112,9 +112,10 @@ HOME_READ = (".local/bin", ".local/share/claude", ".rustup", ".cargo/bin", ".car
 HOME_WRITE = (".cargo/registry", ".cargo/git")
 INSTANCE_READ = ("instance.yaml", "board-store.env", "heads", "projects", "skills", "adapters",
                  "CONTEXT.md", "README.md")
-# The board CLI's lock files and journals beneath the data directory (made before the ruleset).
+# The board CLI's lock files and journals beneath the data directory (made before the ruleset),
+# and the host's heavy-check slot a worker's `ummanu check broad` takes (`runtime.heavy_check`).
 DATA_WRITE_FILES = ("board/.create.lock", "board/.audit.lock", "dispatcher/board-bulk.lock",
-                    "dispatcher/cleanup.lock")
+                    "dispatcher/cleanup.lock", "dispatcher/heavy-check.lock")
 DATA_WRITE_DIRS = ("board/assessment-decisions", "board/sql-sprint-locks", "board/product-issue-transactions",
                    "dispatcher/effects", "dispatcher/admission", "dispatcher/lifecycle")
 # Per role, from the role env the trusted launch command bound (`BOARD_ROLE`, `UMMANU_HEAD_CARD`): a

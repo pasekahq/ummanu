@@ -25,6 +25,14 @@ class HostError(Exception):
         self.bring_up_cause = bring_up_cause
 
 
+class HostCommandTimeout(HostError):
+    """A host command ran past its bound and was killed with its process group."""
+
+    def __init__(self, message: str, *, seconds: float) -> None:
+        super().__init__(message)
+        self.seconds = seconds
+
+
 class OwnershipChanged(HostError):
     """An unlocked preparation lost admission; preserve the newer board owner."""
 

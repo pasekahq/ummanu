@@ -44,6 +44,8 @@ from ummanu.dispatch.bootstrap import default_data_dir
 from ummanu.dispatch.gate import (
     GATE_PENDING_STALL_SECONDS,
     GATE_TRANSPORT_MAX_ATTEMPTS,
+    LOCAL_GATE_DEFERRED,
+    LOCAL_GATE_TIMEOUT,
     GateResult,
 )
 from ummanu.dispatch.gate_pr import PR_BODY_SECTION_CHARS, _pr_digest
@@ -6120,6 +6122,71 @@ class DispatcherRuntimeTests(DispatcherRuntimeFixture, unittest.TestCase):
         reason = self._blocked_reason()
         self.assertIn("timed out after 900 seconds", reason)
         self.assertNotIn("transport", reason)
+
+    def test_a_local_gate_timeout_on_a_worker_green_tree_reruns_uncharged_then_blocks_as_infrastructure(
+        self,
+    ) -> None:
+        self.start_dispatcher()
+        self.catalog._adapter = {"validation": {"ci": "local", "command": "python3 -m unittest"}}
+        timed_out = GateResult(
+            "red",
+            "local validation timed out after 900s on tree 0123456789ab, which the worker's admitted "
+            "broad receipt already passed",
+            failure_class="infrastructure",
+            failure_reason=LOCAL_GATE_TIMEOUT,
+        )
+        self.host.gate_results = [timed_out] * 3
+        self._run_worker_to_validate()
+
+        first = self.tick()
+
+        self.assertEqual(first["action"], "gate-infrastructure-rerun")
+        self.assertEqual(self.reader.show("ummanu-510")["state"], "ci")
+        self.assertIn("The local gate runs again on a later tick (1/2)", self._blocked_reason())
+        self.assertEqual(self._pilot_record()["rejected_failure_reason"], LOCAL_GATE_TIMEOUT)
+        self.assertNotIn("rerun_failed_ci", self.host.calls)
+        self.assertNotIn("restart_worker", self.host.calls)
+        self.assertEqual(self.tick()["action"], "gate-infrastructure-rerun")
+
+        exhausted = self.tick()
+
+        self.assertEqual(exhausted["action"], "gate-infrastructure-reruns-exhausted")
+        self.assertEqual(len(self.host.gate_calls), 3)
+        self.assertEqual(self.reader.show("ummanu-510")["state"], "blocked")
+        self.assertIn("2 local gate rerun(s)", self._blocked_reason())
+        terminal = next(
+            event for event in self.audit_events() if "infrastructure-reruns-exhausted" in event["request_id"]
+        )
+        self.assertEqual(terminal["data"]["terminal_taxonomy"]["blocked_reason"], "infrastructure")
+        budget = [_budget_event_type(event) for event in self.audit_events()]
+        self.assertEqual(_budget_event_type(terminal), "infrastructure_blocked")
+        self.assertNotIn("blocked", budget)
+        self.assertNotIn("red_ci", budget)
+
+    def test_a_local_gate_waiting_for_the_host_slot_is_pending_with_its_reason(self) -> None:
+        self.start_dispatcher()
+        self.catalog._adapter = {"validation": {"ci": "local", "command": "python3 -m unittest"}}
+        deferred = GateResult(
+            "pending",
+            "local gate deferred: pid 42: ummanu check broad in /elsewhere holds the host's heavy-check slot",
+            failure_class="infrastructure",
+            failure_reason=LOCAL_GATE_DEFERRED,
+        )
+        self.host.gate_results = [deferred, deferred]
+        self._run_worker_to_validate()
+
+        outcomes = [self.tick(), self.tick()]
+
+        self.assertEqual([outcome["action"] for outcome in outcomes], ["gate-pending", "gate-pending"])
+        self.assertIn("ummanu check broad in /elsewhere", outcomes[0]["reason"])
+        self.assertEqual(self.reader.show("ummanu-510")["state"], "ci")
+        notes = [
+            comment["body"] for comment in self.reader.show("ummanu-510")["comments"]
+            if "is deferred" in comment["body"]
+        ]
+        self.assertEqual(len(notes), 1, "one deferral note per SHA, not one per tick")
+        self.assertIn("does not count against the gate's time limit", notes[0])
+        self.assertFalse([event for event in self.audit_events() if _budget_event_type(event)])
 
     def test_merge_gate_transport_failure_keeps_the_green_verdict_waiting(self) -> None:
         """The pre-merge re-check under a green verdict: an unreachable backend must not bounce
@@ -15621,7 +15688,7 @@ class DispatcherGateTests(unittest.TestCase):
         card blocks at once with the accurate reason instead of re-running the hung suite."""
 
         class HangingLocalGate(GateHost):
-            def run_capture(self, args, label, *, cwd=None, extra_env=None):  # type: ignore[override]
+            def run_capture(self, args, label, *, cwd=None, extra_env=None, timeout=None):  # type: ignore[override]
                 if args[:2] == ["bash", "-lc"]:
                     raise HostError(
                         "local gate failed: Command '['bash', '-lc', 'python3 -m unittest']' "
