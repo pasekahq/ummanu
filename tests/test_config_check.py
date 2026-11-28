@@ -147,6 +147,27 @@ class ConfigCheckTests(LiveRootCase):
         self.assertTrue(any("enabled" in line for line in findings), findings)
         self.assertIn(f"{len(findings)} finding(s)", summary)
 
+    def test_the_local_gate_limit_must_be_a_positive_integer(self) -> None:
+        adapter = (
+            "setup:\n  commands: ['true']\nsmoke:\n  command: 'true'\n"
+            "validation:\n  ci: local\n  command: 'true'\n  timeout_seconds: {}\n"
+            "artifact_policy:\n  write_project_files: false\n"
+        )
+        self.write("adapters/sample.yaml", adapter.format(1800))
+        self.assertEqual(self.check()[:2], (0, []))
+        for value in ("1.5", "0", "-30", "'900'"):
+            with self.subTest(value=value):
+                self.write("adapters/sample.yaml", adapter.format(value))
+
+                code, findings, _ = self.check()
+
+                self.assertEqual(code, 1)
+                self.assertTrue(findings)
+                self.assertTrue(
+                    all(line.startswith("schema: sample.yaml: validation.timeout_seconds") for line in findings),
+                    findings,
+                )
+
     def test_an_infinite_sprint_budget_is_a_schema_finding(self) -> None:
         path = self.live / "instance.yaml"
         path.write_text(path.read_text() + "sprint_budget:\n  signal: .inf\n  hard: .inf\n")

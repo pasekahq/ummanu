@@ -21,7 +21,14 @@ from ummanu.dispatch.gate_types import (
 )
 from ummanu.dispatch.helpers import _legacy_worker_branch, _tail, safe_one_line
 from ummanu.dispatch.state import DispatcherRecord
-from ummanu.dispatch.types import HostError
+from ummanu.dispatch.types import HostCommandTimeout, HostError
+from ummanu.runtime import heavy_check
+
+# Infrastructure reasons of a local gate: the host slot was busy, or the run outlived its limit
+# on a tree the worker's admitted broad receipt already passed.
+LOCAL_GATE_DEFERRED = "local-gate-deferred"
+LOCAL_GATE_TIMEOUT = "local-gate-timeout"
+LOCAL_GATE_DEFAULT_TIMEOUT_SECONDS = 900
 
 
 def reset_infrastructure_reruns(record: DispatcherRecord) -> None:
@@ -65,7 +72,7 @@ verdicts stay ordinary GateResult outcomes.
         # `none` is an explicit absence of mechanical validation, not an all-green check set.
         return GateResult("green", "ci none: mechanical gate skipped")
     if ci == "local":
-        return _local_gate(host, task, workspace)
+        return _local_gate(host, task, record, workspace)
     if ci == "github":
         return _github_gate(host, task, record, workspace, base, github_ci._required_checks(host, task))
     raise HostError(f"unsupported validation ci mode {ci!r}; expected local, github or none")
@@ -171,14 +178,38 @@ def _recover_base(host, workspace: str, base: str, project: str) -> str:
     return "recovered"
 
 
-def _local_gate(host, task: dict, workspace: str) -> GateResult:
-    command = github_ci._validation(host, task).get("command")
+def local_gate_timeout(validation: dict) -> int:
+    """The project's local gate limit in seconds: `validation.timeout_seconds`, a positive integer."""
+    value = validation.get("timeout_seconds", LOCAL_GATE_DEFAULT_TIMEOUT_SECONDS)
+    integral = isinstance(value, int) and not isinstance(value, bool)
+    if not (integral or isinstance(value, float) and value.is_integer()) or value < 1:
+        raise HostError("local validation timeout_seconds must be a positive integer")
+    return int(value)
+
+
+def _local_gate(host, task: dict, record, workspace: str) -> GateResult:
+    validation = github_ci._validation(host, task)
+    command = validation.get("command")
     if not isinstance(command, str) or not command.strip():
         raise HostError("local validation has no command")
+    timeout = local_gate_timeout(validation)
     pre_run_sha = _head_sha(host, workspace)
     if not is_exact_sha(pre_run_sha):
         raise HostError("local gate could not capture a full pre-run HEAD object id")
-    completed = host.run_capture(["bash", "-lc", command], "local gate", cwd=Path(workspace))
+    with heavy_check.host_slot(heavy_check.slot_path(host.data_dir), f"local gate {task['ref']}") as slot:
+        if not slot.held:
+            return GateResult(
+                "pending",
+                f"local gate deferred: {slot.holder} holds the host's heavy-check slot",
+                failure_class="infrastructure",
+                failure_reason=LOCAL_GATE_DEFERRED,
+            )
+        try:
+            completed = host.run_capture(
+                ["bash", "-lc", command], "local gate", cwd=Path(workspace), extra_env=slot.env, timeout=timeout
+            )
+        except HostCommandTimeout as exc:
+            return _local_gate_timed_out(host, task, record, workspace, pre_run_sha, exc)
     post_run_sha = _head_sha(host, workspace)
     if not is_exact_sha(post_run_sha) or post_run_sha != pre_run_sha:
         detail = (
@@ -215,6 +246,30 @@ def _local_gate(host, task: dict, workspace: str) -> GateResult:
     # Local output lacks Actions provenance and cannot classify infrastructure.
     return GateResult(
         "red", "local validation failed", tail, fingerprint=_fingerprint("local", tail), attestation=receipt
+    )
+
+
+def _local_gate_timed_out(
+    host, task: dict, record, workspace: str, sha: str, exc: HostCommandTimeout
+) -> GateResult:
+    """Class a local gate timeout as infrastructure only when the worker's admitted green broad
+    receipt names the candidate's tree; otherwise it stays a charged gate failure."""
+    tree = _rev_parse(host, workspace, "HEAD^{tree}", "gate candidate tree")
+    admission = (
+        host.worker_admission(task, record) if "broad_check" in host.catalog.adapter(task["project"]) else None
+    )
+    if admission is None or admission["tree_sha"] != tree:
+        raise HostError(
+            f"{exc}; no admitted worker-green broad receipt names candidate tree {tree[:12]}, "
+            "so the timeout is a charged gate failure"
+        ) from None
+    return GateResult(
+        "red",
+        f"local validation timed out after {exc.seconds:g}s on tree {tree[:12]}, which the worker's "
+        "admitted broad receipt already passed",
+        fingerprint=_fingerprint(LOCAL_GATE_TIMEOUT, sha),
+        failure_class="infrastructure",
+        failure_reason=LOCAL_GATE_TIMEOUT,
     )
 
 

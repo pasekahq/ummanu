@@ -98,6 +98,7 @@ from ummanu.dispatch.tui import (
 from ummanu.dispatch.types import (
     STOPPED_BY_DISPATCHER,
     HeadLaunchAborted,
+    HostCommandTimeout,
     HostError,
     LegacyDispatcherRecord,
     MergeLanding,
@@ -958,7 +959,7 @@ class CommandHostRuntime(ObserverHostMixin, WorkspaceEnvironmentMixin, HeadLifec
         )
         if durability_dirt(completed.stdout):
             raise HostError("worker reported done with uncommitted changes")
-        from ummanu.broad_check import BroadCheckError, admitted_check
+        from ummanu.broad_check import BroadCheckError
         from ummanu.check_commands import completion_check
         from ummanu.config import ConfigError
 
@@ -966,16 +967,22 @@ class CommandHostRuntime(ObserverHostMixin, WorkspaceEnvironmentMixin, HeadLifec
             project = str(task.get("project") or "")
             evidence = completion_check(project, workspace, self.catalog.instance_dir) if project else None
             if evidence is not None:
-                accepted = admitted_check(_round_worker_check(
-                    self._card_audit(), task["ref"],
-                    _round_report_ids(record.workspace, record.attempt_id, task["ref"], record.report_generation),
-                ))
+                accepted = self.worker_admission(task, record)
                 if accepted is None:
                     raise HostError("accepted report has no worker admission evidence; drain pre-policy reports before activation")
                 if accepted["snapshot_digest"] != evidence["snapshot_digest"]:
                     raise HostError("candidate/receipt differs from the immutable accepted report")
         except (BroadCheckError, ConfigError) as exc:
             raise HostError(f"worker completion evidence unavailable: {exc}") from exc
+
+    def worker_admission(self, task: dict[str, Any], record: DispatcherRecord) -> dict[str, Any] | None:
+        """This round's admitted green worker broad receipt, or None when the round admitted none."""
+        from ummanu.broad_check import admitted_check
+
+        return admitted_check(_round_worker_check(
+            self._card_audit(), task["ref"],
+            _round_report_ids(record.workspace, record.attempt_id, task["ref"], record.report_generation),
+        ))
 
     def _require_worker_admission(self, task: dict[str, Any], record: DispatcherRecord) -> None:
         """Recovered Validate/review needs the original admission, not a new worker run.
@@ -987,12 +994,7 @@ class CommandHostRuntime(ObserverHostMixin, WorkspaceEnvironmentMixin, HeadLifec
         project = str(task.get("project") or "")
         if not project or "broad_check" not in self.catalog.adapter(project):
             return
-        from ummanu.broad_check import admitted_check
-
-        accepted = admitted_check(_round_worker_check(
-            self._card_audit(), task["ref"],
-            _round_report_ids(record.workspace, record.attempt_id, task["ref"], record.report_generation),
-        ))
+        accepted = self.worker_admission(task, record)
         if accepted is None:
             raise HostError("required immutable worker admission evidence is missing or damaged; drain pre-policy records before activation")
         sha = str(accepted.get("candidate_sha") or "")
@@ -2297,13 +2299,17 @@ class CommandHostRuntime(ObserverHostMixin, WorkspaceEnvironmentMixin, HeadLifec
         *,
         cwd: Path | None = None,
         extra_env: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Like _run but returns the CompletedProcess regardless of exit status (the gate reads a
         non-zero code as a red verdict, not a host failure). Still raises HostError when the process
-        can't run at all. `extra_env` is added to this process's environment for the child."""
+        can't run at all, and HostCommandTimeout past `timeout` (the host bound when None).
+        `extra_env` is added to this process's environment for the child."""
         try:
-            return _run_bounded(args, cwd, extra_env)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+            return _run_bounded(args, cwd, extra_env, timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise HostCommandTimeout(f"{label} failed: {exc}", seconds=exc.timeout) from None
+        except OSError as exc:
             raise HostError(f"{label} failed: {exc}") from None
 
 
@@ -2311,14 +2317,18 @@ HOST_COMMAND_TIMEOUT_SECONDS = 900
 
 
 def _run_bounded(
-    args: list[str], cwd: Path | None, extra_env: dict[str, str] | None = None
+    args: list[str],
+    cwd: Path | None,
+    extra_env: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run one host child to completion, and on a timeout take its descendants down with it.
 
     On timeout terminate the process group, not just its leader.
     """
     env = {**os.environ, **extra_env} if extra_env else None
-    return _proc.run_isolated(args, cwd=cwd, env=env, timeout=HOST_COMMAND_TIMEOUT_SECONDS)
+    bound = HOST_COMMAND_TIMEOUT_SECONDS if timeout is None else timeout
+    return _proc.run_isolated(args, cwd=cwd, env=env, timeout=bound)
 
 
 def _continuation_note(generation: int = 0, decision: str = "") -> str:

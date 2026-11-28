@@ -3189,6 +3189,24 @@ moves the card to Blocked with the infrastructure class and count or unavailable
 applies to the pre-review and pre-merge gates and the release re-check; the pending-stall ceiling
 covers a rerun that never completes.
 
+A local gate (`validation.ci: local`) runs its command under the project's
+`validation.timeout_seconds` (default 900); other host commands keep the host's own bound. A timeout
+on a candidate whose tree equals the tree of the round's admitted worker broad receipt is the
+infrastructure class `local-gate-timeout`: the SHA stays in its stage with no worker round and no
+budget event, and the gate runs again on a later tick, bounded per SHA by the same
+`UMMANU_GATE_INFRASTRUCTURE_RERUN_MAX_ATTEMPTS`. The exhausted ceiling moves the card to Blocked with
+`blocked_reason: infrastructure`, which the sprint budget does not charge. A timeout without that
+evidence Blocks at once as a charged gate failure. This applies to the pre-review and pre-merge gates.
+
+At most one heavy local check runs per installation: a local gate run, or a full `ummanu check broad`
+of a registered project, holds an exclusive `flock` on `<data_dir>/dispatcher/heavy-check.lock` while
+its command runs, and the kernel releases it with the holder's process. A local gate that finds the
+slot held is pending (`local-gate-deferred`), not red: the tick outcome names the holder and the card
+gets one comment per SHA and stage. The wait does not count against `timeout_seconds`; the
+pending-stall ceiling bounds it. `ummanu check broad` waits for the slot and names the holder on
+stderr. A check nested inside the holder (a gate command that runs `ummanu check broad`) runs without
+waiting.
+
 A recovered stale worker result bearing that infrastructure class is accepted once into the same
 bounded gate path; a further report of the unchanged SHA is Blocked, naming the class and prior retry.
 

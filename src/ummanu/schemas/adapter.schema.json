@@ -46,6 +46,11 @@
           "minLength": 1,
           "description": "Local validation command, required when ci is 'local'."
         },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long the local validation command may run, in seconds. Default 900. Waiting for the host's heavy-check slot does not count."
+        },
         "missing": {
           "type": "array",
           "minItems": 1,
